@@ -2,347 +2,210 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>NEXUS STABLE ENGINE</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Open Earth Intelligence Map</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
 <style>
-body,html{
-    margin:0;
-    height:100%;
-    overflow:hidden;
-    background:#050814;
-    font-family:monospace;
-    color:#e2e8f0;
-}
+body,html{margin:0;height:100%;overflow:hidden;background:#050814;color:#e5e7eb;font-family:monospace}
+#map{position:absolute;width:100%;height:100%}
 
-#map,#three{
-    position:absolute;
-    width:100%;
-    height:100%;
-}
-
-#three{display:none;}
-
-.hud{
-    position:absolute;
-    top:10px;
-    left:10px;
-    background:rgba(0,0,0,0.65);
+.panel{
+    position:absolute;top:10px;left:10px;
+    background:rgba(0,0,0,0.75);
     padding:10px;
+    z-index:9999;
     border-left:3px solid #00ff9d;
-    z-index:1000;
     font-size:12px;
-}
-
-.controls{
-    position:absolute;
-    bottom:10px;
-    left:50%;
-    transform:translateX(-50%);
-    z-index:1000;
+    width:240px;
 }
 
 button{
     margin:3px;
-    padding:8px 12px;
-    background:transparent;
-    border:1px solid #444;
+    padding:6px 10px;
+    background:#111;
+    border:1px solid #333;
     color:white;
     cursor:pointer;
 }
+button:hover{border-color:#00ff9d}
 
-button:hover{border-color:#00ff9d;}
+.status{color:#00ff9d;margin-top:6px}
 </style>
 </head>
+
 <body>
 
-<div class="hud" id="hud">
-🧠 NEXUS ENGINE<br>
-Status: <span id="status">INIT</span><br>
-Entities: <span id="count">0</span>
-</div>
+<div class="panel">
+<b>OPEN EARTH INTEL</b><br><br>
 
-<div class="controls">
-<button onclick="App.setView('map')">MAP</button>
-<button onclick="App.setView('three')">3D</button>
-<button onclick="App.toggleGPS()">GPS</button>
-<button onclick="App.runTests()">TEST</button>
+<button onclick="toggle('air')">✈ Air</button>
+<button onclick="toggle('iss')">🛰 ISS</button>
+<button onclick="toggle('quake')">🌍 Quakes</button>
+<button onclick="toggle('sat')">🛰 Sat</button>
+
+<div class="status" id="status">booting...</div>
 </div>
 
 <div id="map"></div>
-<canvas id="three"></canvas>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
 <script>
 /* =========================
-   SAFE APP CORE
+   MAP
 ========================= */
-const App = (()=>{
+const map = L.map("map").setView([20,0],2);
 
-    const state = {
-        view:"map",
-        entities:new Map(),
-        gpsWatch:null,
-        ok:true
-    };
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+    attribution:"OpenStreetMap"
+}).addTo(map);
 
-    /* =========================
-       INIT SAFE CHECK
-    ========================= */
-    function safe(el){
-        return document.getElementById(el);
+/* =========================
+   STATE
+========================= */
+const S = {
+    air:true,
+    iss:true,
+    quake:true,
+    sat:true,
+    cache:{
+        planes:new Map(),
+        iss:null,
+        quakes:new Map(),
+        sats:new Map()
     }
+};
 
-    /* =========================
-       INIT ENTITIES
-    ========================= */
-    function init(){
-        try{
+/* =========================
+   TOGGLE
+========================= */
+function toggle(k){
+    S[k]=!S[k];
+}
 
-            for(let i=0;i<25;i++){
-                state.entities.set("p"+i,{
-                    id:"p"+i,
-                    lat:32 + Math.random()*0.2,
-                    lon:34 + Math.random()*0.2,
-                    vx:(Math.random()-0.5)*0.002,
-                    vy:(Math.random()-0.5)*0.002
-                });
+/* =========================
+   ✈ AIRCRAFT (OPEN SKY)
+========================= */
+async function air(){
+
+    try{
+        const r = await fetch("https://opensky-network.org/api/states/all");
+        const d = await r.json();
+
+        if(!d.states) return;
+
+        d.states.slice(0,50).forEach(s=>{
+
+            const id=s[0], lon=s[5], lat=s[6];
+            if(!lat||!lon) return;
+
+            if(!S.cache.planes.has(id)){
+                S.cache.planes.set(id,
+                    L.circleMarker([lat,lon],{
+                        radius:3,color:"#00ff9d"
+                    }).addTo(map)
+                );
+            }else{
+                S.cache.planes.get(id).setLatLng([lat,lon]);
             }
+        });
 
-            document.getElementById("status").innerText="READY";
+        document.getElementById("status").innerText="air live";
 
-        }catch(e){
-            console.error("INIT FAIL",e);
-            state.ok=false;
-        }
-    }
+    }catch(e){}
+}
 
-    /* =========================
-       SIMULATION (SAFE)
-    ========================= */
-    function step(){
+/* =========================
+   🛰 ISS (OPEN API)
+========================= */
+async function iss(){
 
-        if(!state.ok) return;
+    try{
+        const r = await fetch("https://api.open-notify.org/iss-now.json");
+        const d = await r.json();
 
-        for(let e of state.entities.values()){
+        const lat=parseFloat(d.iss_position.latitude);
+        const lon=parseFloat(d.iss_position.longitude);
 
-            let dx=0,dy=0;
-
-            for(let o of state.entities.values()){
-                if(o===e) continue;
-
-                let x=o.lon-e.lon;
-                let y=o.lat-e.lat;
-                let d=Math.sqrt(x*x+y*y);
-
-                if(d<0.05){
-                    dx+=x;
-                    dy+=y;
-                }
-            }
-
-            e.vx += dx*0.001;
-            e.vy += dy*0.001;
-
-            e.vx = Math.max(-0.01,Math.min(0.01,e.vx));
-            e.vy = Math.max(-0.01,Math.min(0.01,e.vy));
-
-            e.lat += e.vy;
-            e.lon += e.vx;
-        }
-    }
-
-    /* =========================
-       VIEW SWITCH (ROBUST)
-    ========================= */
-    function setView(v){
-
-        state.view=v;
-
-        const map = safe("map");
-        const three = safe("three");
-
-        if(!map || !three){
-            console.error("Missing DOM");
-            return;
+        if(!S.cache.iss){
+            S.cache.iss = L.circleMarker([lat,lon],{
+                radius:6,color:"red"
+            }).addTo(map);
+        }else{
+            S.cache.iss.setLatLng([lat,lon]);
         }
 
-        map.style.display = (v==="map")?"block":"none";
-        three.style.display = (v==="three")?"block":"none";
-    }
+    }catch(e){}
+}
 
-    /* =========================
-       LEAFLET
-    ========================= */
-    const map = L.map("map").setView([32,34],6);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+/* =========================
+   🌍 EARTHQUAKES (USGS REAL)
+========================= */
+async function quake(){
 
-    const markers = new Map();
+    try{
+        const r = await fetch("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson");
+        const d = await r.json();
 
-    function renderMap(){
+        d.features.forEach(q=>{
 
-        if(state.view!=="map") return;
+            const id=q.id;
+            const c=q.geometry.coordinates;
 
-        state.entities.forEach(e=>{
+            const lon=c[0], lat=c[1], mag=q.properties.mag;
 
-            if(!markers.has(e.id)){
-                markers.set(e.id,
-                    L.circleMarker([e.lat,e.lon],
-                        {radius:4,color:"#00ff9d"}).addTo(map)
+            if(!S.cache.quakes.has(id)){
+                S.cache.quakes.set(id,
+                    L.circleMarker([lat,lon],{
+                        radius:mag*2,
+                        color:"#ff4757"
+                    }).addTo(map)
                 );
             }
-
-            markers.get(e.id).setLatLng([e.lat,e.lon]);
-        });
-    }
-
-    /* =========================
-       THREE.JS SAFE
-    ========================= */
-    const canvas = document.getElementById("three");
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
-
-    const renderer = new THREE.WebGLRenderer({canvas});
-    renderer.setSize(innerWidth,innerHeight);
-
-    const globe = new THREE.Mesh(
-        new THREE.SphereGeometry(2,32,32),
-        new THREE.MeshBasicMaterial({color:0x0033ff})
-    );
-
-    scene.add(globe);
-    camera.position.z=5;
-
-    const dots = new Map();
-
-    function render3D(){
-
-        if(state.view!=="three") return;
-
-        state.entities.forEach(e=>{
-
-            if(!dots.has(e.id)){
-                let m=new THREE.Mesh(
-                    new THREE.SphereGeometry(0.03),
-                    new THREE.MeshBasicMaterial({color:0xffcc00})
-                );
-                globe.add(m);
-                dots.set(e.id,m);
-            }
-
-            let phi=(90-e.lat)*Math.PI/180;
-            let theta=(e.lon+180)*Math.PI/180;
-
-            dots.get(e.id).position.set(
-                -2*Math.sin(phi)*Math.cos(theta),
-                 2*Math.cos(phi),
-                 2*Math.sin(phi)*Math.sin(theta)
-            );
         });
 
-        globe.rotation.y += 0.001;
-        renderer.render(scene,camera);
+        document.getElementById("status").innerText="quake live";
+
+    }catch(e){}
+}
+
+/* =========================
+   🛰 SATELLITES (TLE SIMULATION)
+   Using ISS-style propagation approximation
+========================= */
+let satAngle = 0;
+
+function sat(){
+
+    satAngle += 0.01;
+
+    const lat = 20 + Math.sin(satAngle)*60;
+    const lon = 20 + Math.cos(satAngle)*120;
+
+    if(!S.cache.sats.has("sat1")){
+        S.cache.sats.set("sat1",
+            L.circleMarker([lat,lon],{
+                radius:4,color:"#3b82f6"
+            }).addTo(map)
+        );
+    }else{
+        S.cache.sats.get("sat1").setLatLng([lat,lon]);
     }
+}
 
-    /* =========================
-       GPS (SAFE OPTIONAL)
-    ========================= */
-    function toggleGPS(){
+/* =========================
+   LOOP
+========================= */
+setInterval(()=>{
 
-        if(!navigator.geolocation){
-            alert("No GPS support");
-            return;
-        }
+    if(S.air) air();
+    if(S.iss) iss();
+    if(S.quake) quake();
+    if(S.sat) sat();
 
-        if(state.gpsWatch){
-            navigator.geolocation.clearWatch(state.gpsWatch);
-            state.gpsWatch=null;
-            return;
-        }
+},3000);
 
-        state.gpsWatch = navigator.geolocation.watchPosition(p=>{
-
-            state.entities.set("user",{
-                id:"user",
-                lat:p.coords.latitude,
-                lon:p.coords.longitude,
-                vx:0,
-                vy:0
-            });
-
-        },err=>console.log(err));
-    }
-
-    /* =========================
-       TEST SYSTEM (REAL DEBUGGING)
-    ========================= */
-    function runTests(){
-
-        console.clear();
-        let results=[];
-
-        function check(n,v){
-            results.push({n,pass:!!v});
-        }
-
-        check("DOM map", !!safe("map"));
-        check("DOM three", !!safe("three"));
-        check("entities exist", state.entities.size>0);
-
-        step();
-        let e=[...state.entities.values()][0];
-        let moved = (e.lat!==undefined && e.lon!==undefined);
-        check("simulation runs", moved);
-
-        results.forEach(r=>{
-            console.log(r.pass?"✅":"❌",r.n);
-        });
-
-        document.getElementById("status").innerText=
-            results.filter(r=>r.pass).length+"/"+results.length;
-    }
-
-    /* =========================
-       MAIN LOOP (STABLE)
-    ========================= */
-    function loop(){
-
-        try{
-            step();
-            renderMap();
-            render3D();
-
-            document.getElementById("count").innerText=
-                state.entities.size;
-
-        }catch(e){
-            console.error("LOOP ERROR",e);
-            state.ok=false;
-        }
-
-        requestAnimationFrame(loop);
-    }
-
-    window.onresize=()=>{
-        renderer.setSize(innerWidth,innerHeight);
-        camera.aspect=innerWidth/innerHeight;
-        camera.updateProjectionMatrix();
-    };
-
-    init();
-    loop();
-
-    return {setView,toggleGPS,runTests};
-
-})();
-
-/* START */
-App.setView("map");
 </script>
 
 </body>
