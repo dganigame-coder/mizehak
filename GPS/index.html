@@ -1,49 +1,57 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Ultimate GPS + 3D Engine (Stable)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8">
+    <title>Nexus Geolocation Engine</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        :root { --primary: #00f2ff; --bg: #050505; }
+        body { margin:0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color:white; overflow: hidden; }
+        
+        #map, #threeCanvas, #babylonCanvas {
+            position:absolute; top:0; left:0; width:100%; height:100%; display:none;
+        }
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+        /* Glassmorphism UI */
+        .interface {
+            position: absolute; z-index: 1000; padding: 20px; width: 100%;
+            pointer-events: none; box-sizing: border-box;
+        }
+        
+        .hud {
+            background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(10px);
+            border: 1px solid var(--primary); border-radius: 8px;
+            padding: 15px; width: fit-content; pointer-events: auto;
+        }
 
-<style>
-body { margin:0; font-family:Arial; background:#0f172a; color:white; }
+        .controls { margin-top: 10px; pointer-events: auto; }
+        
+        button {
+            background: rgba(255,255,255,0.1); border: 1px solid var(--primary);
+            color: var(--primary); padding: 8px 16px; cursor: pointer;
+            transition: 0.3s; text-transform: uppercase; font-weight: bold;
+        }
 
-#map, #threeCanvas, #babylonCanvas {
-    position:absolute;
-    top:0; left:0;
-    width:100%; height:100%;
-    display:none;
-}
+        button:hover { background: var(--primary); color: black; box-shadow: 0 0 15px var(--primary); }
+        button.active { background: var(--primary); color: black; }
 
-.controls {
-    position:absolute;
-    top:10px;
-    left:10px;
-    z-index:1000;
-}
-
-button {
-    margin:4px;
-    padding:8px 12px;
-    border:none;
-    border-radius:6px;
-    background:#2563eb;
-    color:white;
-    cursor:pointer;
-}
-</style>
+        #coords { font-family: monospace; color: var(--primary); margin-bottom: 10px; display: block; }
+    </style>
 </head>
-
 <body>
 
-<div class="controls">
-    <button onclick="showMode('map')">Map</button>
-    <button onclick="showMode('three')">3D Globe</button>
-    <button onclick="showMode('babylon')">Simulation</button>
-    <button onclick="startGPS()">Start GPS</button>
-    <button onclick="stopGPS()">Stop GPS</button>
+<div class="interface">
+    <div class="hud">
+        <span id="coords">Lat: 0.000 | Lon: 0.000</span>
+        <div class="controls">
+            <button onclick="showMode('map')" id="btn-map">2D Map</button>
+            <button onclick="showMode('three')" id="btn-three">3D Globe</button>
+            <button onclick="showMode('babylon')" id="btn-babylon">Sim</button>
+            <button onclick="toggleGPS()" id="btn-gps" style="border-color: #ff4757; color: #ff4757;">Start GPS</button>
+        </div>
+    </div>
 </div>
 
 <div id="map"></div>
@@ -56,245 +64,136 @@ button {
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 
 <script>
-/* =========================
-   GLOBAL
-========================= */
-let currentMode = null;
+let state = { lat: 0, lon: 0, active: false, mode: 'map' };
 let gpsWatchId = null;
 
-/* =========================
-   MODE SWITCH
-========================= */
-const mapDiv = document.getElementById("map");
-const threeCanvas = document.getElementById("threeCanvas");
-const babylonCanvas = document.getElementById("babylonCanvas");
-
+/* --- UI LOGIC --- */
 function showMode(mode){
-    currentMode = mode;
-
-    mapDiv.style.display = "none";
-    threeCanvas.style.display = "none";
-    babylonCanvas.style.display = "none";
-
-    if(mode === "map") mapDiv.style.display = "block";
-    if(mode === "three") threeCanvas.style.display = "block";
-    if(mode === "babylon") babylonCanvas.style.display = "block";
-
+    state.mode = mode;
+    [mapDiv, threeCanvas, babylonCanvas].forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+    
+    if(mode === 'map') { mapDiv.style.display = 'block'; document.getElementById('btn-map').classList.add('active'); }
+    if(mode === 'three') { threeCanvas.style.display = 'block'; document.getElementById('btn-three').classList.add('active'); }
+    if(mode === 'babylon') { babylonCanvas.style.display = 'block'; document.getElementById('btn-babylon').classList.add('active'); }
     resizeAll();
 }
 
-/* =========================
-   RESIZE FIX
-========================= */
-function resizeAll(){
-    try {
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-    } catch(e){}
-
-    try {
-        engine.resize();
-    } catch(e){}
-}
-
-window.addEventListener("resize", resizeAll);
-
-/* =========================
-   MAP (Leaflet)
-========================= */
+/* --- LEAFLET (DARK MODE) --- */
+const mapDiv = document.getElementById("map");
 let map = L.map(mapDiv).setView([20,0], 2);
-
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution:'© OpenStreetMap'
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; CartoDB'
 }).addTo(map);
+let marker = L.circleMarker([0,0], {color: '#00f2ff', radius: 10}).addTo(map);
 
-let marker;
-let routeLine;
-
-function updateMap(lat, lon){
-    map.setView([lat, lon], 15);
-
-    if(!marker){
-        marker = L.marker([lat, lon]).addTo(map);
-    } else {
-        marker.setLatLng([lat, lon]);
-    }
-}
-
-/* ROUTE */
-map.on("click", function(e){
-    if(!marker) return;
-
-    let start = marker.getLatLng();
-    let end = e.latlng;
-
-    fetch(`https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`)
-    .then(r => r.json())
-    .then(data => {
-        if(!data.routes || !data.routes.length) return;
-
-        let coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-
-        if(routeLine) map.removeLayer(routeLine);
-
-        routeLine = L.polyline(coords, {color:"cyan"}).addTo(map);
-    })
-    .catch(()=>{});
-});
-
-/* =========================
-   THREE.JS
-========================= */
+/* --- THREE.JS (IMPROVED GLOBE) --- */
 let scene = new THREE.Scene();
-
-let camera = new THREE.PerspectiveCamera(
-    75, window.innerWidth/window.innerHeight, 0.1, 1000
-);
-
-let renderer = new THREE.WebGLRenderer({
-    canvas: threeCanvas,
-    antialias:true
-});
-
+let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+let renderer = new THREE.WebGLRenderer({canvas: threeCanvas, antialias: true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 
-let earthTexture = new THREE.TextureLoader().load(
-    "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earthmap1k.jpg",
-    undefined,
-    undefined,
-    () => {
-        console.warn("Texture failed, using fallback color");
-    }
-);
-
+// Better Globe with Shading
+let globeGroup = new THREE.Group();
 let earth = new THREE.Mesh(
     new THREE.SphereGeometry(2, 64, 64),
-    new THREE.MeshBasicMaterial({
-        map: earthTexture || null,
-        color: earthTexture ? 0xffffff : 0x2266aa
+    new THREE.MeshStandardMaterial({ 
+        map: new THREE.TextureLoader().load('https://unpkg.com/three-globe/example/img/earth-dark.jpg'),
+        metalness: 0.4, roughness: 0.7
     })
 );
+globeGroup.add(earth);
+scene.add(globeGroup);
+scene.add(new THREE.AmbientLight(0x404040, 2));
+let sun = new THREE.DirectionalLight(0xffffff, 3);
+sun.position.set(5,3,5);
+scene.add(sun);
 
-scene.add(earth);
-
-let atmosphere = new THREE.Mesh(
-    new THREE.SphereGeometry(2.1, 64, 64),
-    new THREE.MeshBasicMaterial({
-        color:0x3399ff,
-        transparent:true,
-        opacity:0.2
-    })
+let userPointer = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 16, 16),
+    new THREE.MeshBasicMaterial({color: 0x00f2ff})
 );
-scene.add(atmosphere);
-
+globeGroup.add(userPointer);
 camera.position.z = 5;
 
-let userMarker3D;
-
-function latLonToVector3(lat, lon){
-    let phi = (90 - lat) * Math.PI/180;
-    let theta = (lon + 180) * Math.PI/180;
-
-    return new THREE.Vector3(
+function updateThree(lat, lon) {
+    const phi = (90 - lat) * (Math.PI / 180);
+    const theta = (lon + 180) * (Math.PI / 180);
+    userPointer.position.set(
         -2 * Math.sin(phi) * Math.cos(theta),
         2 * Math.cos(phi),
         2 * Math.sin(phi) * Math.sin(theta)
     );
+    // Smoothly rotate globe to face user
+    globeGroup.rotation.y = -theta + Math.PI/2;
+    globeGroup.rotation.x = phi - Math.PI/2;
 }
 
-function updateGlobe(lat, lon){
-    if(!userMarker3D){
-        userMarker3D = new THREE.Mesh(
-            new THREE.SphereGeometry(0.05,16,16),
-            new THREE.MeshBasicMaterial({color:0xff0000})
-        );
-        scene.add(userMarker3D);
-    }
-
-    userMarker3D.position.copy(latLonToVector3(lat, lon));
-}
-
-function animateThree(){
+function animateThree() {
     requestAnimationFrame(animateThree);
-
-    if(currentMode !== "three") return;
-
-    earth.rotation.y += 0.001;
-    renderer.render(scene, camera);
+    if(state.mode === 'three') renderer.render(scene, camera);
 }
 animateThree();
 
-/* =========================
-   BABYLON
-========================= */
-let engine = new BABYLON.Engine(babylonCanvas, true);
-let sceneB = new BABYLON.Scene(engine);
+/* --- BABYLON (GRID SIM) --- */
+let bEngine = new BABYLON.Engine(babylonCanvas, true);
+let bScene = new BABYLON.Scene(bEngine);
+bScene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.02, 1);
+let bCam = new BABYLON.ArcRotateCamera("c", -Math.PI/2, Math.PI/2.5, 10, BABYLON.Vector3.Zero(), bScene);
+bCam.attachControl(babylonCanvas, true);
+let bLight = new BABYLON.HemisphericLight("l", new BABYLON.Vector3(0,1,0), bScene);
+let grid = BABYLON.MeshBuilder.CreateGround("g", {width:100, height:100, subdivisions: 20}, bScene);
+let gridMat = new BABYLON.StandardMaterial("gm", bScene);
+gridMat.wireframe = true; gridMat.diffuseColor = new BABYLON.Color3(0, 0.4, 0.6);
+grid.material = gridMat;
 
-let cameraB = new BABYLON.ArcRotateCamera(
-    "cam", Math.PI/2, Math.PI/3, 20,
-    BABYLON.Vector3.Zero(), sceneB
-);
-cameraB.attachControl(babylonCanvas, true);
+let player = BABYLON.MeshBuilder.CreateBox("p", {size: 1}, bScene);
+player.material = new BABYLON.StandardMaterial("pm", bScene);
+player.material.emissiveColor = new BABYLON.Color3(0, 1, 1);
 
-new BABYLON.HemisphericLight("light",
-    new BABYLON.Vector3(0,1,0), sceneB);
-
-BABYLON.MeshBuilder.CreateGround("ground",
-    {width:50, height:50}, sceneB);
-
-let sphere = BABYLON.MeshBuilder.CreateSphere(
-    "parrot", {diameter:1}, sceneB
-);
-
-function updateSimulation(lat, lon){
-    sphere.position.x = (lat - 32) * 5;
-    sphere.position.z = (lon - 34) * 5;
+function updateBabylon(lat, lon) {
+    // Relative movement simulation
+    player.position.x = (lon % 1) * 100; 
+    player.position.z = (lat % 1) * 100;
 }
+bEngine.runRenderLoop(() => { if(state.mode === 'babylon') bScene.render(); });
 
-engine.runRenderLoop(() => {
-    if(currentMode === "babylon"){
-        sceneB.render();
-    }
-});
-
-/* =========================
-   GPS
-========================= */
-function startGPS(){
-    if(gpsWatchId) return;
-
-    if(!navigator.geolocation){
-        alert("Geolocation not supported");
-        return;
-    }
-
-    gpsWatchId = navigator.geolocation.watchPosition(pos => {
-        let lat = pos.coords.latitude;
-        let lon = pos.coords.longitude;
-
-        updateMap(lat, lon);
-        updateGlobe(lat, lon);
-        updateSimulation(lat, lon);
-
-    }, err => {
-        alert(err.message);
-    }, {
-        enableHighAccuracy:true
-    });
-}
-
-function stopGPS(){
-    if(gpsWatchId){
+/* --- CORE GPS LOGIC --- */
+function toggleGPS() {
+    const btn = document.getElementById('btn-gps');
+    if(state.active) {
         navigator.geolocation.clearWatch(gpsWatchId);
-        gpsWatchId = null;
+        state.active = false;
+        btn.innerText = "Start GPS";
+        btn.style.borderColor = "#ff4757";
+    } else {
+        gpsWatchId = navigator.geolocation.watchPosition(p => {
+            const {latitude, longitude} = p.coords;
+            state.lat = latitude; state.lon = longitude;
+            document.getElementById('coords').innerText = `Lat: ${latitude.toFixed(4)} | Lon: ${longitude.toFixed(4)}`;
+            
+            marker.setLatLng([latitude, longitude]);
+            if(!state.active) map.setView([latitude, longitude], 15);
+            
+            updateThree(latitude, longitude);
+            updateBabylon(latitude, longitude);
+            state.active = true;
+        }, err => alert(err.message), {enableHighAccuracy: true});
+        
+        btn.innerText = "GPS Active";
+        btn.style.borderColor = "#2ecc71";
     }
 }
 
-/* START */
-showMode("map");
-
+function resizeAll() {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    bEngine.resize();
+    map.invalidateSize();
+}
+window.addEventListener("resize", resizeAll);
+showMode('map');
 </script>
-
 </body>
 </html>
