@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>NEXUS SLM WORLD ENGINE v1</title>
+<title>NEXUS STABLE ENGINE</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -29,10 +29,11 @@ body,html{
     position:absolute;
     top:10px;
     left:10px;
-    background:rgba(0,0,0,0.6);
+    background:rgba(0,0,0,0.65);
     padding:10px;
     border-left:3px solid #00ff9d;
     z-index:1000;
+    font-size:12px;
 }
 
 .controls{
@@ -51,21 +52,23 @@ button{
     color:white;
     cursor:pointer;
 }
+
 button:hover{border-color:#00ff9d;}
 </style>
 </head>
 <body>
 
-<div class="hud">
-🧠 NEXUS SLM WORLD ENGINE<br>
-Mode: <span id="mode">MAP</span><br>
+<div class="hud" id="hud">
+🧠 NEXUS ENGINE<br>
+Status: <span id="status">INIT</span><br>
 Entities: <span id="count">0</span>
 </div>
 
 <div class="controls">
-<button onclick="setView('map')">2D Map</button>
-<button onclick="setView('3d')">3D Globe</button>
-<button onclick="toggleGPS()">GPS</button>
+<button onclick="App.setView('map')">MAP</button>
+<button onclick="App.setView('three')">3D</button>
+<button onclick="App.toggleGPS()">GPS</button>
+<button onclick="App.runTests()">TEST</button>
 </div>
 
 <div id="map"></div>
@@ -76,242 +79,270 @@ Entities: <span id="count">0</span>
 
 <script>
 /* =========================
-   WORLD STATE + SLM CORE
+   SAFE APP CORE
 ========================= */
-const World = {
-    entities: new Map(),
-    gps: null,
-    view: "map"
-};
+const App = (()=>{
 
-/* 🧠 "SLM-LIKE" BEHAVIOR MODEL */
-function classify(entity){
-
-    const v = Math.sqrt(entity.vx**2 + entity.vy**2);
-
-    if(v < 0.0005) return "idle";
-    if(v < 0.003) return "walking";
-    return "flying";
-}
-
-/* prediction model */
-function predict(e, dt=1){
-    return {
-        lat: e.lat + e.vy * dt,
-        lon: e.lon + e.vx * dt
+    const state = {
+        view:"map",
+        entities:new Map(),
+        gpsWatch:null,
+        ok:true
     };
-}
 
-/* =========================
-   INIT PARROT FLOCK
-========================= */
-for(let i=0;i<40;i++){
-    World.entities.set("p"+i,{
-        id:"p"+i,
-        lat:32 + Math.random()*0.2,
-        lon:34 + Math.random()*0.2,
-        vx:(Math.random()-0.5)*0.002,
-        vy:(Math.random()-0.5)*0.002,
-        trail:[]
-    });
-}
+    /* =========================
+       INIT SAFE CHECK
+    ========================= */
+    function safe(el){
+        return document.getElementById(el);
+    }
 
-/* =========================
-   SIMULATION ENGINE
-========================= */
-function simulate(){
+    /* =========================
+       INIT ENTITIES
+    ========================= */
+    function init(){
+        try{
 
-    for(let e of World.entities.values()){
-
-        // flock behavior (boids-lite)
-        let ax=0, ay=0, cx=0, cy=0, count=0;
-
-        for(let o of World.entities.values()){
-            if(o===e) continue;
-
-            let dx=o.lon-e.lon;
-            let dy=o.lat-e.lat;
-            let d=Math.sqrt(dx*dx+dy*dy);
-
-            if(d<0.05){
-                cx+=o.lon;
-                cy+=o.lat;
-                ax+=o.vx;
-                ay+=o.vy;
-                count++;
+            for(let i=0;i<25;i++){
+                state.entities.set("p"+i,{
+                    id:"p"+i,
+                    lat:32 + Math.random()*0.2,
+                    lon:34 + Math.random()*0.2,
+                    vx:(Math.random()-0.5)*0.002,
+                    vy:(Math.random()-0.5)*0.002
+                });
             }
+
+            document.getElementById("status").innerText="READY";
+
+        }catch(e){
+            console.error("INIT FAIL",e);
+            state.ok=false;
         }
-
-        if(count>0){
-            e.vx += (ax/count)*0.01;
-            e.vy += (ay/count)*0.01;
-
-            e.vx += (cx/count - e.lon)*0.0005;
-            e.vy += (cy/count - e.lat)*0.0005;
-        }
-
-        // clamp
-        e.vx = Math.max(-0.01, Math.min(0.01, e.vx));
-        e.vy = Math.max(-0.01, Math.min(0.01, e.vy));
-
-        e.lat += e.vy;
-        e.lon += e.vx;
-
-        e.trail.push([e.lat,e.lon]);
-        if(e.trail.length>20) e.trail.shift();
-
-        e.state = classify(e);
     }
 
-    document.getElementById("count").innerText = World.entities.size;
-}
+    /* =========================
+       SIMULATION (SAFE)
+    ========================= */
+    function step(){
 
-/* =========================
-   LEAFLET MAP
-========================= */
-const map = L.map("map").setView([32,34],6);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+        if(!state.ok) return;
 
-const markers = new Map();
+        for(let e of state.entities.values()){
 
-function renderMap(){
+            let dx=0,dy=0;
 
-    if(World.view!=="map") return;
+            for(let o of state.entities.values()){
+                if(o===e) continue;
 
-    for(let e of World.entities.values()){
+                let x=o.lon-e.lon;
+                let y=o.lat-e.lat;
+                let d=Math.sqrt(x*x+y*y);
 
-        if(!markers.has(e.id)){
-            markers.set(e.id,
-                L.circleMarker([e.lat,e.lon],{
-                    radius:4,
-                    color:"#00ff9d"
-                }).addTo(map)
-            );
+                if(d<0.05){
+                    dx+=x;
+                    dy+=y;
+                }
+            }
+
+            e.vx += dx*0.001;
+            e.vy += dy*0.001;
+
+            e.vx = Math.max(-0.01,Math.min(0.01,e.vx));
+            e.vy = Math.max(-0.01,Math.min(0.01,e.vy));
+
+            e.lat += e.vy;
+            e.lon += e.vx;
+        }
+    }
+
+    /* =========================
+       VIEW SWITCH (ROBUST)
+    ========================= */
+    function setView(v){
+
+        state.view=v;
+
+        const map = safe("map");
+        const three = safe("three");
+
+        if(!map || !three){
+            console.error("Missing DOM");
+            return;
         }
 
-        markers.get(e.id).setLatLng([e.lat,e.lon]);
+        map.style.display = (v==="map")?"block":"none";
+        three.style.display = (v==="three")?"block":"none";
     }
-}
 
-/* =========================
-   THREE.JS VIEW
-========================= */
-const canvas = document.getElementById("three");
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
-const renderer = new THREE.WebGLRenderer({canvas});
+    /* =========================
+       LEAFLET
+    ========================= */
+    const map = L.map("map").setView([32,34],6);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-renderer.setSize(innerWidth,innerHeight);
+    const markers = new Map();
 
-const globe = new THREE.Mesh(
-    new THREE.SphereGeometry(2,64,64),
-    new THREE.MeshBasicMaterial({
-        map:new THREE.TextureLoader().load(
-            "https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg"
-        )
-    })
-);
+    function renderMap(){
 
-scene.add(globe);
-camera.position.z=5;
+        if(state.view!=="map") return;
 
-const dots = new Map();
+        state.entities.forEach(e=>{
 
-function latLonTo3D(lat,lon){
-    let phi=(90-lat)*Math.PI/180;
-    let theta=(lon+180)*Math.PI/180;
+            if(!markers.has(e.id)){
+                markers.set(e.id,
+                    L.circleMarker([e.lat,e.lon],
+                        {radius:4,color:"#00ff9d"}).addTo(map)
+                );
+            }
 
-    return new THREE.Vector3(
-        -2*Math.sin(phi)*Math.cos(theta),
-         2*Math.cos(phi),
-         2*Math.sin(phi)*Math.sin(theta)
+            markers.get(e.id).setLatLng([e.lat,e.lon]);
+        });
+    }
+
+    /* =========================
+       THREE.JS SAFE
+    ========================= */
+    const canvas = document.getElementById("three");
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
+
+    const renderer = new THREE.WebGLRenderer({canvas});
+    renderer.setSize(innerWidth,innerHeight);
+
+    const globe = new THREE.Mesh(
+        new THREE.SphereGeometry(2,32,32),
+        new THREE.MeshBasicMaterial({color:0x0033ff})
     );
-}
 
-function render3D(){
+    scene.add(globe);
+    camera.position.z=5;
 
-    if(World.view!=="3d") return;
+    const dots = new Map();
 
-    for(let e of World.entities.values()){
+    function render3D(){
 
-        if(!dots.has(e.id)){
-            let m=new THREE.Mesh(
-                new THREE.SphereGeometry(0.03),
-                new THREE.MeshBasicMaterial({color:0xffcc00})
+        if(state.view!=="three") return;
+
+        state.entities.forEach(e=>{
+
+            if(!dots.has(e.id)){
+                let m=new THREE.Mesh(
+                    new THREE.SphereGeometry(0.03),
+                    new THREE.MeshBasicMaterial({color:0xffcc00})
+                );
+                globe.add(m);
+                dots.set(e.id,m);
+            }
+
+            let phi=(90-e.lat)*Math.PI/180;
+            let theta=(e.lon+180)*Math.PI/180;
+
+            dots.get(e.id).position.set(
+                -2*Math.sin(phi)*Math.cos(theta),
+                 2*Math.cos(phi),
+                 2*Math.sin(phi)*Math.sin(theta)
             );
-            globe.add(m);
-            dots.set(e.id,m);
-        }
-
-        let p=predict(e,0.5);
-        dots.get(e.id).position.copy(latLonTo3D(p.lat,p.lon));
-    }
-
-    globe.rotation.y += 0.001;
-    renderer.render(scene,camera);
-}
-
-/* =========================
-   GPS INPUT (USER AGENT)
-========================= */
-function toggleGPS(){
-
-    if(World.gps){
-        navigator.geolocation.clearWatch(World.gps);
-        World.gps=null;
-        return;
-    }
-
-    World.gps = navigator.geolocation.watchPosition(p=>{
-
-        World.entities.set("user",{
-            id:"user",
-            lat:p.coords.latitude,
-            lon:p.coords.longitude,
-            vx:0,
-            vy:0,
-            trail:[]
         });
 
-    },err=>console.log(err),{
-        enableHighAccuracy:true
-    });
-}
+        globe.rotation.y += 0.001;
+        renderer.render(scene,camera);
+    }
 
-/* =========================
-   VIEW SWITCH
-========================= */
-function setView(v){
+    /* =========================
+       GPS (SAFE OPTIONAL)
+    ========================= */
+    function toggleGPS(){
 
-    World.view=v;
+        if(!navigator.geolocation){
+            alert("No GPS support");
+            return;
+        }
 
-    map.style.display = v==="map"?"block":"none";
-    canvas.style.display = v==="3d"?"block":"none";
+        if(state.gpsWatch){
+            navigator.geolocation.clearWatch(state.gpsWatch);
+            state.gpsWatch=null;
+            return;
+        }
 
-    document.getElementById("mode").innerText=v.toUpperCase();
-}
+        state.gpsWatch = navigator.geolocation.watchPosition(p=>{
 
-/* =========================
-   MAIN LOOP
-========================= */
-function loop(){
+            state.entities.set("user",{
+                id:"user",
+                lat:p.coords.latitude,
+                lon:p.coords.longitude,
+                vx:0,
+                vy:0
+            });
 
-    simulate();
-    renderMap();
-    render3D();
+        },err=>console.log(err));
+    }
 
-    requestAnimationFrame(loop);
-}
+    /* =========================
+       TEST SYSTEM (REAL DEBUGGING)
+    ========================= */
+    function runTests(){
 
-setView("map");
-loop();
+        console.clear();
+        let results=[];
 
-/* resize */
-window.onresize=()=>{
-    renderer.setSize(innerWidth,innerHeight);
-    camera.aspect=innerWidth/innerHeight;
-    camera.updateProjectionMatrix();
-};
+        function check(n,v){
+            results.push({n,pass:!!v});
+        }
+
+        check("DOM map", !!safe("map"));
+        check("DOM three", !!safe("three"));
+        check("entities exist", state.entities.size>0);
+
+        step();
+        let e=[...state.entities.values()][0];
+        let moved = (e.lat!==undefined && e.lon!==undefined);
+        check("simulation runs", moved);
+
+        results.forEach(r=>{
+            console.log(r.pass?"✅":"❌",r.n);
+        });
+
+        document.getElementById("status").innerText=
+            results.filter(r=>r.pass).length+"/"+results.length;
+    }
+
+    /* =========================
+       MAIN LOOP (STABLE)
+    ========================= */
+    function loop(){
+
+        try{
+            step();
+            renderMap();
+            render3D();
+
+            document.getElementById("count").innerText=
+                state.entities.size;
+
+        }catch(e){
+            console.error("LOOP ERROR",e);
+            state.ok=false;
+        }
+
+        requestAnimationFrame(loop);
+    }
+
+    window.onresize=()=>{
+        renderer.setSize(innerWidth,innerHeight);
+        camera.aspect=innerWidth/innerHeight;
+        camera.updateProjectionMatrix();
+    };
+
+    init();
+    loop();
+
+    return {setView,toggleGPS,runTests};
+
+})();
+
+/* START */
+App.setView("map");
 </script>
 
 </body>
