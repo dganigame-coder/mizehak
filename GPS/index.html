@@ -1,294 +1,318 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>TITAN v4 | Predictive Nexus Engine</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    <style>
-        :root { --neon: #00ff9d; --bg: #020617; --panel: rgba(7, 15, 30, 0.9); }
-        body, html { margin: 0; height: 100%; background: var(--bg); color: #e2e8f0; font-family: 'fira code', monospace; overflow: hidden; }
-        
-        canvas, #map { position: absolute; width: 100%; height: 100%; visibility: hidden; opacity: 0; transition: opacity 0.5s ease; }
-        .active { visibility: visible !important; opacity: 1 !important; }
+<meta charset="UTF-8">
+<title>NEXUS SLM WORLD ENGINE v1</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-        .telemetry-hud {
-            position: absolute; top: 20px; left: 20px; z-index: 1000;
-            background: var(--panel); border: 1px solid rgba(0, 255, 157, 0.2);
-            padding: 15px; width: 300px; backdrop-filter: blur(10px);
-            pointer-events: none;
-        }
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
-        .view-nav {
-            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            display: flex; gap: 8px; z-index: 1000; padding: 10px; background: rgba(0,0,0,0.5);
-            border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
-        }
+<style>
+body,html{
+    margin:0;
+    height:100%;
+    overflow:hidden;
+    background:#050814;
+    font-family:monospace;
+    color:#e2e8f0;
+}
 
-        button {
-            background: rgba(255,255,255,0.05); border: 1px solid #334155; color: #94a3b8;
-            padding: 8px 16px; cursor: pointer; font-size: 11px; text-transform: uppercase;
-            transition: all 0.2s;
-        }
+#map,#three{
+    position:absolute;
+    width:100%;
+    height:100%;
+}
 
-        button.selected { border-color: var(--neon); color: var(--neon); background: rgba(0, 255, 157, 0.1); }
-        .data-point { display: flex; justify-content: space-between; font-size: 11px; margin-top: 4px; }
-        .label { color: #64748b; }
-    </style>
+#three{display:none;}
+
+.hud{
+    position:absolute;
+    top:10px;
+    left:10px;
+    background:rgba(0,0,0,0.6);
+    padding:10px;
+    border-left:3px solid #00ff9d;
+    z-index:1000;
+}
+
+.controls{
+    position:absolute;
+    bottom:10px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:1000;
+}
+
+button{
+    margin:3px;
+    padding:8px 12px;
+    background:transparent;
+    border:1px solid #444;
+    color:white;
+    cursor:pointer;
+}
+button:hover{border-color:#00ff9d;}
+</style>
 </head>
 <body>
 
-<div class="telemetry-hud" id="hud">
-    <div style="color: var(--neon); font-size: 12px; margin-bottom: 10px;">[ TITAN_CORE_V4 ]</div>
-    <div id="entity-monitor"></div>
+<div class="hud">
+🧠 NEXUS SLM WORLD ENGINE<br>
+Mode: <span id="mode">MAP</span><br>
+Entities: <span id="count">0</span>
 </div>
 
-<div class="view-nav">
-    <button onclick="Core.setView('map')" id="btn-map">2D_Tactical</button>
-    <button onclick="Core.setView('three')" id="btn-three">3D_Orbital</button>
-    <button onclick="Core.setView('babylon')" id="btn-babylon">Sim_Grid</button>
-    <button onclick="Core.toggleGPS()" id="btn-gps" style="color: #ff4757;">GPS_Link</button>
+<div class="controls">
+<button onclick="setView('map')">2D Map</button>
+<button onclick="setView('3d')">3D Globe</button>
+<button onclick="toggleGPS()">GPS</button>
 </div>
 
 <div id="map"></div>
 <canvas id="three"></canvas>
-<canvas id="babylon"></canvas>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
-<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
 <script>
-/**
- * ARCHITECTURAL LAYER: REACTIVE STATE & PREDICTION LOGIC
- */
-const Core = (() => {
-    const state = {
-        entities: new Map(),
-        subscribers: [],
-        currentView: 'map',
-        gpsId: null,
-        historyLimit: 50
-    };
+/* =========================
+   WORLD STATE + SLM CORE
+========================= */
+const World = {
+    entities: new Map(),
+    gps: null,
+    view: "map"
+};
 
-    const notify = () => state.subscribers.forEach(fn => fn(state));
+/* 🧠 "SLM-LIKE" BEHAVIOR MODEL */
+function classify(entity){
 
+    const v = Math.sqrt(entity.vx**2 + entity.vy**2);
+
+    if(v < 0.0005) return "idle";
+    if(v < 0.003) return "walking";
+    return "flying";
+}
+
+/* prediction model */
+function predict(e, dt=1){
     return {
-        subscribe: (fn) => state.subscribers.push(fn),
-        
-        updateEntity: (id, lat, lon) => {
-            const now = performance.now();
-            let e = state.entities.get(id);
-
-            if (!e) {
-                e = { 
-                    lat, lon, vLat: 0, vLon: 0, 
-                    lastUpdate: now, history: [], 
-                    renderPos: { lat, lon } // Interpolation target
-                };
-            } else {
-                const dt = (now - e.lastUpdate) / 1000; // time in seconds
-                if (dt > 0) {
-                    e.vLat = (lat - e.lat) / dt;
-                    e.vLon = (lon - e.lon) / dt;
-                }
-                e.history.push({ lat: e.lat, lon: e.lon });
-                if (e.history.length > state.historyLimit) e.history.shift();
-                
-                e.lat = lat;
-                e.lon = lon;
-                e.lastUpdate = now;
-            }
-            state.entities.set(id, e);
-            notify();
-        },
-
-        // Prediction Extrapolation
-        getPredictedPosition: (id) => {
-            const e = state.entities.get(id);
-            if (!e) return null;
-            const elapsed = (performance.now() - e.lastUpdate) / 1000;
-            return {
-                lat: e.lat + (e.vLat * elapsed),
-                lon: e.lon + (e.vLon * elapsed)
-            };
-        },
-
-        setView: (v) => {
-            state.currentView = v;
-            ['map', 'three', 'babylon'].forEach(id => {
-                document.getElementById(id).classList.toggle('active', id === v);
-                document.getElementById(`btn-${id}`).classList.toggle('selected', id === v);
-            });
-            notify();
-        },
-
-        toggleGPS: () => {
-            if (state.gpsId) {
-                navigator.geolocation.clearWatch(state.gpsId);
-                state.gpsId = null;
-                document.getElementById('btn-gps').innerText = 'GPS_LINK';
-            } else {
-                state.gpsId = navigator.geolocation.watchPosition(
-                    p => Core.updateEntity('user', p.coords.latitude, p.coords.longitude),
-                    null, { enableHighAccuracy: true }
-                );
-                document.getElementById('btn-gps').innerText = 'GPS_ONLINE';
-            }
-        },
-
-        getState: () => state
+        lat: e.lat + e.vy * dt,
+        lon: e.lon + e.vx * dt
     };
-})();
+}
 
-/**
- * RENDER ADAPTER: THREE.JS (Orbital)
- */
-const ThreeAdapter = (() => {
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three'), antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
+/* =========================
+   INIT PARROT FLOCK
+========================= */
+for(let i=0;i<40;i++){
+    World.entities.set("p"+i,{
+        id:"p"+i,
+        lat:32 + Math.random()*0.2,
+        lon:34 + Math.random()*0.2,
+        vx:(Math.random()-0.5)*0.002,
+        vy:(Math.random()-0.5)*0.002,
+        trail:[]
+    });
+}
 
-    const globe = new THREE.Mesh(
-        new THREE.SphereGeometry(2, 64, 64),
-        new THREE.MeshStandardMaterial({ 
-            map: new THREE.TextureLoader().load('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg'),
-            roughness: 0.5 
-        })
-    );
-    scene.add(globe);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-    const sun = new THREE.DirectionalLight(0xffffff, 2);
-    sun.position.set(5, 3, 5);
-    scene.add(sun);
-    camera.position.z = 5;
+/* =========================
+   SIMULATION ENGINE
+========================= */
+function simulate(){
 
-    const meshes = new Map();
+    for(let e of World.entities.values()){
 
-    const latLonToVec3 = (lat, lon, radius = 2.02) => {
-        const phi = (90 - lat) * (Math.PI / 180);
-        const theta = (lon + 180) * (Math.PI / 180);
-        return new THREE.Vector3(
-            -radius * Math.sin(phi) * Math.cos(theta),
-            radius * Math.cos(phi),
-            radius * Math.sin(phi) * Math.sin(theta)
-        );
-    };
+        // flock behavior (boids-lite)
+        let ax=0, ay=0, cx=0, cy=0, count=0;
 
-    function animate() {
-        requestAnimationFrame(animate);
-        const state = Core.getState();
-        if (state.currentView !== 'three') return;
+        for(let o of World.entities.values()){
+            if(o===e) continue;
 
-        state.entities.forEach((e, id) => {
-            if (!meshes.has(id)) {
-                const m = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({ color: 0x00ff9d }));
-                scene.add(m);
-                meshes.set(id, m);
+            let dx=o.lon-e.lon;
+            let dy=o.lat-e.lat;
+            let d=Math.sqrt(dx*dx+dy*dy);
+
+            if(d<0.05){
+                cx+=o.lon;
+                cy+=o.lat;
+                ax+=o.vx;
+                ay+=o.vy;
+                count++;
             }
+        }
 
-            // 1. Get Extrapolation
-            const predicted = Core.getPredictedPosition(id);
-            
-            // 2. Linear Interpolation (Lerp) for Render Position
-            e.renderPos.lat += (predicted.lat - e.renderPos.lat) * 0.1;
-            e.renderPos.lon += (predicted.lon - e.renderPos.lon) * 0.1;
+        if(count>0){
+            e.vx += (ax/count)*0.01;
+            e.vy += (ay/count)*0.01;
 
-            // 3. Map to 3D Space
-            meshes.get(id).position.copy(latLonToVec3(e.renderPos.lat, e.renderPos.lon));
-        });
+            e.vx += (cx/count - e.lon)*0.0005;
+            e.vy += (cy/count - e.lat)*0.0005;
+        }
 
-        globe.rotation.y += 0.0005;
-        renderer.render(scene, camera);
+        // clamp
+        e.vx = Math.max(-0.01, Math.min(0.01, e.vx));
+        e.vy = Math.max(-0.01, Math.min(0.01, e.vy));
+
+        e.lat += e.vy;
+        e.lon += e.vx;
+
+        e.trail.push([e.lat,e.lon]);
+        if(e.trail.length>20) e.trail.shift();
+
+        e.state = classify(e);
     }
-    return { init: animate };
-})();
 
-/**
- * RENDER ADAPTER: LEAFLET (2D Tactical)
- */
-const MapAdapter = (() => {
-    const map = L.map('map', { zoomControl: false }).setView([20, 0], 2);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
-    
-    const elements = new Map();
+    document.getElementById("count").innerText = World.entities.size;
+}
 
-    Core.subscribe(state => {
-        if (state.currentView !== 'map') return;
-        state.entities.forEach((e, id) => {
-            if (!elements.has(id)) {
-                const marker = L.circleMarker([e.lat, e.lon], { color: '#00ff9d', radius: 5 }).addTo(map);
-                const poly = L.polyline([], { color: '#00ff9d', weight: 1, opacity: 0.5 }).addTo(map);
-                elements.set(id, { marker, poly });
-            }
-            const { marker, poly } = elements.get(id);
-            marker.setLatLng([e.lat, e.lon]);
-            poly.setLatLngs(e.history.map(h => [h.lat, h.lon]));
+/* =========================
+   LEAFLET MAP
+========================= */
+const map = L.map("map").setView([32,34],6);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+const markers = new Map();
+
+function renderMap(){
+
+    if(World.view!=="map") return;
+
+    for(let e of World.entities.values()){
+
+        if(!markers.has(e.id)){
+            markers.set(e.id,
+                L.circleMarker([e.lat,e.lon],{
+                    radius:4,
+                    color:"#00ff9d"
+                }).addTo(map)
+            );
+        }
+
+        markers.get(e.id).setLatLng([e.lat,e.lon]);
+    }
+}
+
+/* =========================
+   THREE.JS VIEW
+========================= */
+const canvas = document.getElementById("three");
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
+const renderer = new THREE.WebGLRenderer({canvas});
+
+renderer.setSize(innerWidth,innerHeight);
+
+const globe = new THREE.Mesh(
+    new THREE.SphereGeometry(2,64,64),
+    new THREE.MeshBasicMaterial({
+        map:new THREE.TextureLoader().load(
+            "https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg"
+        )
+    })
+);
+
+scene.add(globe);
+camera.position.z=5;
+
+const dots = new Map();
+
+function latLonTo3D(lat,lon){
+    let phi=(90-lat)*Math.PI/180;
+    let theta=(lon+180)*Math.PI/180;
+
+    return new THREE.Vector3(
+        -2*Math.sin(phi)*Math.cos(theta),
+         2*Math.cos(phi),
+         2*Math.sin(phi)*Math.sin(theta)
+    );
+}
+
+function render3D(){
+
+    if(World.view!=="3d") return;
+
+    for(let e of World.entities.values()){
+
+        if(!dots.has(e.id)){
+            let m=new THREE.Mesh(
+                new THREE.SphereGeometry(0.03),
+                new THREE.MeshBasicMaterial({color:0xffcc00})
+            );
+            globe.add(m);
+            dots.set(e.id,m);
+        }
+
+        let p=predict(e,0.5);
+        dots.get(e.id).position.copy(latLonTo3D(p.lat,p.lon));
+    }
+
+    globe.rotation.y += 0.001;
+    renderer.render(scene,camera);
+}
+
+/* =========================
+   GPS INPUT (USER AGENT)
+========================= */
+function toggleGPS(){
+
+    if(World.gps){
+        navigator.geolocation.clearWatch(World.gps);
+        World.gps=null;
+        return;
+    }
+
+    World.gps = navigator.geolocation.watchPosition(p=>{
+
+        World.entities.set("user",{
+            id:"user",
+            lat:p.coords.latitude,
+            lon:p.coords.longitude,
+            vx:0,
+            vy:0,
+            trail:[]
         });
+
+    },err=>console.log(err),{
+        enableHighAccuracy:true
     });
-})();
+}
 
-/**
- * RENDER ADAPTER: BABYLON.JS (Sim Grid)
- */
-const BabylonAdapter = (() => {
-    const canvas = document.getElementById("babylon");
-    const engine = new BABYLON.Engine(canvas, true);
-    const scene = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color4(0.01, 0.02, 0.04, 1);
+/* =========================
+   VIEW SWITCH
+========================= */
+function setView(v){
 
-    const camera = new BABYLON.ArcRotateCamera("cam", 0, 0.8, 30, BABYLON.Vector3.Zero(), scene);
-    camera.attachControl(canvas, true);
-    new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+    World.view=v;
 
-    const grid = BABYLON.MeshBuilder.CreateGround("grid", { width: 1000, height: 1000, subdivisions: 100 }, scene);
-    const gridMat = new BABYLON.StandardMaterial("gmat", scene);
-    gridMat.wireframe = true;
-    gridMat.emissiveColor = new BABYLON.Color3(0, 0.2, 0.4);
-    grid.material = gridMat;
+    map.style.display = v==="map"?"block":"none";
+    canvas.style.display = v==="3d"?"block":"none";
 
-    const meshes = new Map();
+    document.getElementById("mode").innerText=v.toUpperCase();
+}
 
-    engine.runRenderLoop(() => {
-        const state = Core.getState();
-        if (state.currentView !== 'babylon') return;
+/* =========================
+   MAIN LOOP
+========================= */
+function loop(){
 
-        state.entities.forEach((e, id) => {
-            if (!meshes.has(id)) {
-                const box = BABYLON.MeshBuilder.CreateBox(id, { size: 1 }, scene);
-                box.material = new BABYLON.StandardMaterial("m", scene);
-                box.material.emissiveColor = new BABYLON.Color3(0, 1, 0.6);
-                meshes.set(id, box);
-            }
-            
-            const predicted = Core.getPredictedPosition(id);
-            // Babylon specific lerp for simulated grid
-            const targetX = predicted.lon * 10;
-            const targetZ = predicted.lat * 10;
-            
-            meshes.get(id).position.x += (targetX - meshes.get(id).position.x) * 0.05;
-            meshes.get(id).position.z += (targetZ - meshes.get(id).position.z) * 0.05;
-        });
+    simulate();
+    renderMap();
+    render3D();
 
-        scene.render();
-    });
-})();
+    requestAnimationFrame(loop);
+}
 
-/**
- * DATA SOURCE: ISS TRACKER
- */
-setInterval(async () => {
-    try {
-        const r = await fetch('https://api.open-notify.org/iss-now.json');
-        const d = await r.json();
-        Core.updateEntity('iss', parseFloat(d.iss_position.latitude), parseFloat(d.iss_position.longitude));
-    } catch(e) {}
-}, 2000);
+setView("map");
+loop();
 
-// Init Systems
-ThreeAdapter.init();
-Core.setView('map');
-window.onresize = () => { location.reload(); }; // Simplified resize handling for architecture demo
+/* resize */
+window.onresize=()=>{
+    renderer.setSize(innerWidth,innerHeight);
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+};
 </script>
+
 </body>
 </html>
