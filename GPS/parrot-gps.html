@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Parrot Flock Nexus Engine</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+body,html{
+    margin:0;
+    height:100%;
+    overflow:hidden;
+    background:#050814;
+    font-family:monospace;
+    color:white;
+}
+
+#map,#three,#babylon{
+    position:absolute;
+    width:100%;
+    height:100%;
+    display:none;
+}
+
+.controls{
+    position:absolute;
+    bottom:15px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:1000;
+}
+
+button{
+    margin:3px;
+    padding:8px 14px;
+    border:1px solid #444;
+    background:transparent;
+    color:white;
+    cursor:pointer;
+}
+
+button:hover{border-color:#00ff9d;}
+
+.hud{
+    position:absolute;
+    top:10px;
+    left:10px;
+    background:rgba(0,0,0,0.6);
+    padding:10px;
+    border-left:3px solid #00ff9d;
+    z-index:1000;
+}
+</style>
+</head>
+
+<body>
+
+<div class="hud">
+    🦜 Parrot Flock Engine<br>
+    Entities: <span id="count">0</span>
+</div>
+
+<div class="controls">
+    <button onclick="setView('map')">Map</button>
+    <button onclick="setView('three')">3D Globe</button>
+    <button onclick="setView('babylon')">Simulation</button>
+</div>
+
+<div id="map"></div>
+<canvas id="three"></canvas>
+<canvas id="babylon"></canvas>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+
+<script>
+/* =========================
+   STATE
+========================= */
+const State = {
+    parrots: [],
+    view: "map"
+};
+
+/* =========================
+   INIT PARROTS
+========================= */
+function createParrot(id){
+    return {
+        id,
+        lat: 32 + Math.random(),
+        lon: 34 + Math.random(),
+        vx: (Math.random()-0.5)*0.01,
+        vy: (Math.random()-0.5)*0.01
+    };
+}
+
+for(let i=0;i<25;i++){
+    State.parrots.push(createParrot("p"+i));
+}
+
+/* =========================
+   FLOCK (BOIDS)
+========================= */
+function updateFlock(){
+    const neighbors = 0.8;
+    const speedLimit = 0.02;
+
+    for(let p of State.parrots){
+
+        let center={x:0,y:0,c:0};
+        let avoid={x:0,y:0};
+        let align={x:0,y:0};
+
+        for(let o of State.parrots){
+            if(p===o) continue;
+
+            let dx=o.lon-p.lon;
+            let dy=o.lat-p.lat;
+            let d=Math.sqrt(dx*dx+dy*dy);
+
+            if(d<neighbors){
+                center.x+=o.lon;
+                center.y+=o.lat;
+                center.c++;
+
+                avoid.x-=dx;
+                avoid.y-=dy;
+
+                align.x+=o.vx;
+                align.y+=o.vy;
+            }
+        }
+
+        if(center.c>0){
+            p.vx += ((center.x/center.c)-p.lon)*0.001;
+            p.vy += ((center.y/center.c)-p.lat)*0.001;
+        }
+
+        p.vx += avoid.x*0.005;
+        p.vy += avoid.y*0.005;
+
+        p.vx += align.x*0.02;
+        p.vy += align.y*0.02;
+
+        let sp=Math.sqrt(p.vx*p.vx+p.vy*p.vy);
+        if(sp>speedLimit){
+            p.vx=(p.vx/sp)*speedLimit;
+            p.vy=(p.vy/sp)*speedLimit;
+        }
+
+        p.lon+=p.vx;
+        p.lat+=p.vy;
+    }
+}
+
+/* =========================
+   MAP (LEAFLET)
+========================= */
+const map=L.map("map").setView([32,34],5);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+const markers=new Map();
+
+function renderMap(){
+    State.parrots.forEach(p=>{
+        if(!markers.has(p.id)){
+            markers.set(p.id,
+                L.circleMarker([p.lat,p.lon],{radius:4,color:"#00ff9d"}).addTo(map)
+            );
+        }else{
+            markers.get(p.id).setLatLng([p.lat,p.lon]);
+        }
+    });
+}
+
+/* =========================
+   THREE.JS
+========================= */
+const three=document.getElementById("three");
+const scene=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
+const renderer=new THREE.WebGLRenderer({canvas:three});
+renderer.setSize(innerWidth,innerHeight);
+
+const globe=new THREE.Mesh(
+    new THREE.SphereGeometry(2,64,64),
+    new THREE.MeshBasicMaterial({
+        map:new THREE.TextureLoader().load(
+            "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earthmap1k.jpg"
+        )
+    })
+);
+
+scene.add(globe);
+cam.position.z=5;
+
+const dots=new Map();
+
+function latLon(lat,lon){
+    let phi=(90-lat)*Math.PI/180;
+    let theta=(lon+180)*Math.PI/180;
+    return new THREE.Vector3(
+        -2*Math.sin(phi)*Math.cos(theta),
+        2*Math.cos(phi),
+        2*Math.sin(phi)*Math.sin(theta)
+    );
+}
+
+function renderThree(){
+    requestAnimationFrame(renderThree);
+    if(State.view!=="three") return;
+
+    globe.rotation.y+=0.001;
+
+    State.parrots.forEach(p=>{
+        if(!dots.has(p.id)){
+            let d=new THREE.Mesh(
+                new THREE.SphereGeometry(0.04),
+                new THREE.MeshBasicMaterial({color:0xffcc00})
+            );
+            globe.add(d);
+            dots.set(p.id,d);
+        }
+
+        dots.get(p.id).position.copy(latLon(p.lat,p.lon));
+    });
+
+    renderer.render(scene,cam);
+}
+renderThree();
+
+/* =========================
+   BABYLON GRID
+========================= */
+const bCanvas=document.getElementById("babylon");
+const engine=new BABYLON.Engine(bCanvas,true);
+const bScene=new BABYLON.Scene(engine);
+
+const bCam=new BABYLON.ArcRotateCamera("c",1,1,20,BABYLON.Vector3.Zero(),bScene);
+bCam.attachControl(bCanvas,true);
+
+new BABYLON.HemisphericLight("l",new BABYLON.Vector3(0,1,0),bScene);
+
+const grid=BABYLON.MeshBuilder.CreateGround("g",{width:50,height:50},bScene);
+
+const boxes=new Map();
+
+function renderBabylon(){
+    State.parrots.forEach(p=>{
+        if(!boxes.has(p.id)){
+            let b=BABYLON.MeshBuilder.CreateBox(p.id,{size:0.5},bScene);
+            boxes.set(p.id,b);
+        }
+
+        let m=boxes.get(p.id);
+        m.position.x=(p.lon-34)*20;
+        m.position.z=(p.lat-32)*20;
+    });
+
+    if(State.view==="babylon") bScene.render();
+}
+engine.runRenderLoop(renderBabylon);
+
+/* =========================
+   LOOP
+========================= */
+function loop(){
+    updateFlock();
+
+    document.getElementById("count").innerText=State.parrots.length;
+
+    renderMap();
+
+    requestAnimationFrame(loop);
+}
+loop();
+
+/* =========================
+   VIEW SWITCH
+========================= */
+function setView(v){
+    State.view=v;
+
+    document.getElementById("map").style.display="none";
+    document.getElementById("three").style.display="none";
+    document.getElementById("babylon").style.display="none";
+
+    document.getElementById(v).style.display="block";
+}
+
+setView("map");
+
+window.onresize=()=>{
+    renderer.setSize(innerWidth,innerHeight);
+    cam.aspect=innerWidth/innerHeight;
+    cam.updateProjectionMatrix();
+    engine.resize();
+};
+</script>
+
+</body>
+</html>
