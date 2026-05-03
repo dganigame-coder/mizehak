@@ -1,80 +1,195 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Free GPS Map</title>
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
-    <style>
-        body { margin: 0; font-family: sans-serif; }
-        #map { height: 90vh; width: 100%; }
-        .controls { height: 10vh; display: flex; align-items: center; justify-content: center; background: #f4f4f4; }
-        button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
-    </style>
+<meta charset="UTF-8">
+<title>Ultimate GPS + 3D Engine</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+body { margin:0; font-family:Arial; background:#0f172a; color:white; }
+
+#map, #threeCanvas, #babylonCanvas {
+    position:absolute;
+    top:0; left:0;
+    width:100%; height:100%;
+    display:none;
+}
+
+.controls {
+    position:absolute;
+    top:10px;
+    left:10px;
+    z-index:1000;
+}
+
+button {
+    margin:4px;
+    padding:8px 12px;
+    border:none;
+    border-radius:6px;
+    background:#2563eb;
+    color:white;
+    cursor:pointer;
+}
+</style>
 </head>
+
 <body>
 
-    <div class="controls">
-        <button onclick="getLocation()">Find My Location</button>
-    </div>
-    <div id="map"></div>
+<div class="controls">
+    <button onclick="showMode('map')">Map</button>
+    <button onclick="showMode('three')">3D Globe</button>
+    <button onclick="showMode('babylon')">Simulation</button>
+    <button onclick="startGPS()">Start GPS</button>
+</div>
 
-    <!-- Leaflet JavaScript -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<div id="map"></div>
+<canvas id="threeCanvas"></canvas>
+<canvas id="babylonCanvas"></canvas>
 
-    <script>
-        // Initialize the map and set it to a default world view
-        var map = L.map('map').setView([20, 0], 2);
+<!-- LIBS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
 
-        // Add OpenStreetMap tiles (This is the free map data)
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }).addTo(map);
+<script>
+/* =========================
+   MODE SWITCHING
+========================= */
+function showMode(mode){
+    document.getElementById("map").style.display = "none";
+    document.getElementById("threeCanvas").style.display = "none";
+    document.getElementById("babylonCanvas").style.display = "none";
 
-        var marker;
+    if(mode === "map") document.getElementById("map").style.display = "block";
+    if(mode === "three") document.getElementById("threeCanvas").style.display = "block";
+    if(mode === "babylon") document.getElementById("babylonCanvas").style.display = "block";
+}
 
-        function getLocation() {
-            if (navigator.geolocation) {
-                // This browser API "extracts" the GPS data
-                navigator.geolocation.getCurrentPosition(showPosition, showError);
-            } else {
-                alert("Geolocation is not supported by this browser.");
-            }
-        }
+/* =========================
+   LEAFLET MAP
+========================= */
+let map = L.map('map').setView([20,0], 2);
 
-        function showPosition(position) {
-            const lat = position.coords.latitude;
-            const lon = position.coords.longitude;
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution:'© OpenStreetMap'
+}).addTo(map);
 
-            // Zoom in on the user's location
-            map.setView([lat, lon], 15);
+let marker;
 
-            // Add or move a marker
-            if (marker) {
-                marker.setLatLng([lat, lon]);
-            } else {
-                marker = L.marker([lat, lon]).addTo(map)
-                    .bindPopup("You are here!")
-                    .openPopup();
-            }
-        }
+function updateMap(lat, lon){
+    map.setView([lat, lon], 15);
 
-        function showError(error) {
-            switch(error.code) {
-                case error.PERMISSION_DENIED:
-                    alert("User denied the request for Geolocation.");
-                    break;
-                case error.POSITION_UNAVAILABLE:
-                    alert("Location information is unavailable.");
-                    break;
-                case error.TIMEOUT:
-                    alert("The request to get user location timed out.");
-                    break;
-            }
-        }
-    </script>
+    if(!marker){
+        marker = L.marker([lat, lon]).addTo(map);
+    } else {
+        marker.setLatLng([lat, lon]);
+    }
+}
+
+/* =========================
+   THREE.JS GLOBE
+========================= */
+let scene = new THREE.Scene();
+let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+let renderer = new THREE.WebGLRenderer({canvas: document.getElementById("threeCanvas")});
+renderer.setSize(window.innerWidth, window.innerHeight);
+
+let geometry = new THREE.SphereGeometry(2, 64, 64);
+let texture = new THREE.TextureLoader().load("https://threejs.org/examples/textures/earth_atmos_2048.jpg");
+let material = new THREE.MeshBasicMaterial({map: texture});
+let earth = new THREE.Mesh(geometry, material);
+
+scene.add(earth);
+camera.position.z = 5;
+
+let userMarker3D;
+
+function latLonToVector3(lat, lon){
+    let phi = (90 - lat) * (Math.PI/180);
+    let theta = (lon + 180) * (Math.PI/180);
+
+    let x = -2 * Math.sin(phi) * Math.cos(theta);
+    let y = 2 * Math.cos(phi);
+    let z = 2 * Math.sin(phi) * Math.sin(theta);
+
+    return new THREE.Vector3(x,y,z);
+}
+
+function updateGlobe(lat, lon){
+    if(!userMarker3D){
+        let geo = new THREE.SphereGeometry(0.05,16,16);
+        let mat = new THREE.MeshBasicMaterial({color:0xff0000});
+        userMarker3D = new THREE.Mesh(geo, mat);
+        scene.add(userMarker3D);
+    }
+
+    userMarker3D.position.copy(latLonToVector3(lat, lon));
+}
+
+function animateThree(){
+    requestAnimationFrame(animateThree);
+    earth.rotation.y += 0.0005;
+    renderer.render(scene, camera);
+}
+animateThree();
+
+/* =========================
+   BABYLON SIMULATION
+========================= */
+let canvas = document.getElementById("babylonCanvas");
+let engine = new BABYLON.Engine(canvas, true);
+
+let sceneB = new BABYLON.Scene(engine);
+
+let cameraB = new BABYLON.ArcRotateCamera("cam",
+    Math.PI/2, Math.PI/3, 10,
+    BABYLON.Vector3.Zero(), sceneB);
+cameraB.attachControl(canvas, true);
+
+let light = new BABYLON.HemisphericLight("light",
+    new BABYLON.Vector3(0,1,0), sceneB);
+
+let ground = BABYLON.MeshBuilder.CreateGround("ground",
+    {width:20, height:20}, sceneB);
+
+let sphere = BABYLON.MeshBuilder.CreateSphere("parrot", {diameter:1}, sceneB);
+
+function updateSimulation(lat, lon){
+    sphere.position.x = lat/10;
+    sphere.position.z = lon/10;
+}
+
+engine.runRenderLoop(() => {
+    sceneB.render();
+});
+
+/* =========================
+   GPS ENGINE
+========================= */
+function startGPS(){
+    navigator.geolocation.watchPosition(pos => {
+        let lat = pos.coords.latitude;
+        let lon = pos.coords.longitude;
+
+        updateMap(lat, lon);
+        updateGlobe(lat, lon);
+        updateSimulation(lat, lon);
+
+    }, err => {
+        alert(err.message);
+    }, {
+        enableHighAccuracy:true
+    });
+}
+
+/* START */
+showMode('map');
+
+</script>
+
 </body>
 </html>
