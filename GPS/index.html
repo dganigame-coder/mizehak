@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Ultimate GPS + 3D Engine</title>
+<title>Ultimate GPS + 3D Engine (Stable)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
 <style>
@@ -44,6 +43,7 @@ button {
     <button onclick="showMode('three')">3D Globe</button>
     <button onclick="showMode('babylon')">Simulation</button>
     <button onclick="startGPS()">Start GPS</button>
+    <button onclick="stopGPS()">Stop GPS</button>
 </div>
 
 <div id="map"></div>
@@ -57,28 +57,60 @@ button {
 
 <script>
 /* =========================
-   MODE SWITCHING
+   GLOBAL
 ========================= */
-function showMode(mode){
-    document.getElementById("map").style.display = "none";
-    document.getElementById("threeCanvas").style.display = "none";
-    document.getElementById("babylonCanvas").style.display = "none";
+let currentMode = null;
+let gpsWatchId = null;
 
-    if(mode === "map") document.getElementById("map").style.display = "block";
-    if(mode === "three") document.getElementById("threeCanvas").style.display = "block";
-    if(mode === "babylon") document.getElementById("babylonCanvas").style.display = "block";
+/* =========================
+   MODE SWITCH
+========================= */
+const mapDiv = document.getElementById("map");
+const threeCanvas = document.getElementById("threeCanvas");
+const babylonCanvas = document.getElementById("babylonCanvas");
+
+function showMode(mode){
+    currentMode = mode;
+
+    mapDiv.style.display = "none";
+    threeCanvas.style.display = "none";
+    babylonCanvas.style.display = "none";
+
+    if(mode === "map") mapDiv.style.display = "block";
+    if(mode === "three") threeCanvas.style.display = "block";
+    if(mode === "babylon") babylonCanvas.style.display = "block";
+
+    resizeAll();
 }
 
 /* =========================
-   LEAFLET MAP
+   RESIZE FIX
 ========================= */
-let map = L.map('map').setView([20,0], 2);
+function resizeAll(){
+    try {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+    } catch(e){}
+
+    try {
+        engine.resize();
+    } catch(e){}
+}
+
+window.addEventListener("resize", resizeAll);
+
+/* =========================
+   MAP (Leaflet)
+========================= */
+let map = L.map(mapDiv).setView([20,0], 2);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution:'© OpenStreetMap'
 }).addTo(map);
 
 let marker;
+let routeLine;
 
 function updateMap(lat, lon){
     map.setView([lat, lon], 15);
@@ -90,40 +122,93 @@ function updateMap(lat, lon){
     }
 }
 
+/* ROUTE */
+map.on("click", function(e){
+    if(!marker) return;
+
+    let start = marker.getLatLng();
+    let end = e.latlng;
+
+    fetch(`https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`)
+    .then(r => r.json())
+    .then(data => {
+        if(!data.routes || !data.routes.length) return;
+
+        let coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+
+        if(routeLine) map.removeLayer(routeLine);
+
+        routeLine = L.polyline(coords, {color:"cyan"}).addTo(map);
+    })
+    .catch(()=>{});
+});
+
 /* =========================
-   THREE.JS GLOBE
+   THREE.JS
 ========================= */
 let scene = new THREE.Scene();
-let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-let renderer = new THREE.WebGLRenderer({canvas: document.getElementById("threeCanvas")});
+
+let camera = new THREE.PerspectiveCamera(
+    75, window.innerWidth/window.innerHeight, 0.1, 1000
+);
+
+let renderer = new THREE.WebGLRenderer({
+    canvas: threeCanvas,
+    antialias:true
+});
+
 renderer.setSize(window.innerWidth, window.innerHeight);
 
-let geometry = new THREE.SphereGeometry(2, 64, 64);
-let texture = new THREE.TextureLoader().load("https://threejs.org/examples/textures/earth_atmos_2048.jpg");
-let material = new THREE.MeshBasicMaterial({map: texture});
-let earth = new THREE.Mesh(geometry, material);
+let earthTexture = new THREE.TextureLoader().load(
+    "https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earthmap1k.jpg",
+    undefined,
+    undefined,
+    () => {
+        console.warn("Texture failed, using fallback color");
+    }
+);
+
+let earth = new THREE.Mesh(
+    new THREE.SphereGeometry(2, 64, 64),
+    new THREE.MeshBasicMaterial({
+        map: earthTexture || null,
+        color: earthTexture ? 0xffffff : 0x2266aa
+    })
+);
 
 scene.add(earth);
+
+let atmosphere = new THREE.Mesh(
+    new THREE.SphereGeometry(2.1, 64, 64),
+    new THREE.MeshBasicMaterial({
+        color:0x3399ff,
+        transparent:true,
+        opacity:0.2
+    })
+);
+scene.add(atmosphere);
+
 camera.position.z = 5;
 
 let userMarker3D;
 
 function latLonToVector3(lat, lon){
-    let phi = (90 - lat) * (Math.PI/180);
-    let theta = (lon + 180) * (Math.PI/180);
+    let phi = (90 - lat) * Math.PI/180;
+    let theta = (lon + 180) * Math.PI/180;
 
-    let x = -2 * Math.sin(phi) * Math.cos(theta);
-    let y = 2 * Math.cos(phi);
-    let z = 2 * Math.sin(phi) * Math.sin(theta);
-
-    return new THREE.Vector3(x,y,z);
+    return new THREE.Vector3(
+        -2 * Math.sin(phi) * Math.cos(theta),
+        2 * Math.cos(phi),
+        2 * Math.sin(phi) * Math.sin(theta)
+    );
 }
 
 function updateGlobe(lat, lon){
     if(!userMarker3D){
-        let geo = new THREE.SphereGeometry(0.05,16,16);
-        let mat = new THREE.MeshBasicMaterial({color:0xff0000});
-        userMarker3D = new THREE.Mesh(geo, mat);
+        userMarker3D = new THREE.Mesh(
+            new THREE.SphereGeometry(0.05,16,16),
+            new THREE.MeshBasicMaterial({color:0xff0000})
+        );
         scene.add(userMarker3D);
     }
 
@@ -132,46 +217,59 @@ function updateGlobe(lat, lon){
 
 function animateThree(){
     requestAnimationFrame(animateThree);
-    earth.rotation.y += 0.0005;
+
+    if(currentMode !== "three") return;
+
+    earth.rotation.y += 0.001;
     renderer.render(scene, camera);
 }
 animateThree();
 
 /* =========================
-   BABYLON SIMULATION
+   BABYLON
 ========================= */
-let canvas = document.getElementById("babylonCanvas");
-let engine = new BABYLON.Engine(canvas, true);
-
+let engine = new BABYLON.Engine(babylonCanvas, true);
 let sceneB = new BABYLON.Scene(engine);
 
-let cameraB = new BABYLON.ArcRotateCamera("cam",
-    Math.PI/2, Math.PI/3, 10,
-    BABYLON.Vector3.Zero(), sceneB);
-cameraB.attachControl(canvas, true);
+let cameraB = new BABYLON.ArcRotateCamera(
+    "cam", Math.PI/2, Math.PI/3, 20,
+    BABYLON.Vector3.Zero(), sceneB
+);
+cameraB.attachControl(babylonCanvas, true);
 
-let light = new BABYLON.HemisphericLight("light",
+new BABYLON.HemisphericLight("light",
     new BABYLON.Vector3(0,1,0), sceneB);
 
-let ground = BABYLON.MeshBuilder.CreateGround("ground",
-    {width:20, height:20}, sceneB);
+BABYLON.MeshBuilder.CreateGround("ground",
+    {width:50, height:50}, sceneB);
 
-let sphere = BABYLON.MeshBuilder.CreateSphere("parrot", {diameter:1}, sceneB);
+let sphere = BABYLON.MeshBuilder.CreateSphere(
+    "parrot", {diameter:1}, sceneB
+);
 
 function updateSimulation(lat, lon){
-    sphere.position.x = lat/10;
-    sphere.position.z = lon/10;
+    sphere.position.x = (lat - 32) * 5;
+    sphere.position.z = (lon - 34) * 5;
 }
 
 engine.runRenderLoop(() => {
-    sceneB.render();
+    if(currentMode === "babylon"){
+        sceneB.render();
+    }
 });
 
 /* =========================
-   GPS ENGINE
+   GPS
 ========================= */
 function startGPS(){
-    navigator.geolocation.watchPosition(pos => {
+    if(gpsWatchId) return;
+
+    if(!navigator.geolocation){
+        alert("Geolocation not supported");
+        return;
+    }
+
+    gpsWatchId = navigator.geolocation.watchPosition(pos => {
         let lat = pos.coords.latitude;
         let lon = pos.coords.longitude;
 
@@ -186,8 +284,15 @@ function startGPS(){
     });
 }
 
+function stopGPS(){
+    if(gpsWatchId){
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+    }
+}
+
 /* START */
-showMode('map');
+showMode("map");
 
 </script>
 
