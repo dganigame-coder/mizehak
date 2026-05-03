@@ -2,198 +2,229 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Nexus Geolocation Engine</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    
+    <title>TITAN v3 | Nexus Systems</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <style>
-        :root { --primary: #00f2ff; --bg: #050505; }
-        body { margin:0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color:white; overflow: hidden; }
+        :root { --neon: #00ff9d; --warning: #ff4757; --glass: rgba(5, 10, 20, 0.9); }
+        body, html { margin: 0; padding: 0; height: 100%; background: #010409; color: #e6edf3; font-family: 'JetBrains Mono', monospace; overflow: hidden; }
         
-        #map, #threeCanvas, #babylonCanvas {
-            position:absolute; top:0; left:0; width:100%; height:100%; display:none;
-        }
+        #map, #three, #babylon { position: absolute; width: 100%; height: 100%; visibility: hidden; opacity: 0; transition: opacity 0.6s ease; }
+        .visible { visibility: visible !important; opacity: 1 !important; }
 
-        /* Glassmorphism UI */
-        .interface {
-            position: absolute; z-index: 1000; padding: 20px; width: 100%;
-            pointer-events: none; box-sizing: border-box;
-        }
-        
+        /* Tactical HUD */
         .hud {
-            background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(10px);
-            border: 1px solid var(--primary); border-radius: 8px;
-            padding: 15px; width: fit-content; pointer-events: auto;
+            position: absolute; top: 20px; left: 20px; z-index: 1000;
+            background: var(--glass); border-left: 4px solid var(--neon);
+            padding: 20px; backdrop-filter: blur(12px); width: 280px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
-
-        .controls { margin-top: 10px; pointer-events: auto; }
         
-        button {
-            background: rgba(255,255,255,0.1); border: 1px solid var(--primary);
-            color: var(--primary); padding: 8px 16px; cursor: pointer;
-            transition: 0.3s; text-transform: uppercase; font-weight: bold;
+        .entity-card { border-bottom: 1px solid #30363d; padding: 8px 0; font-size: 11px; }
+        .label { color: #8b949e; text-transform: uppercase; margin-right: 5px; }
+        .val { color: var(--neon); }
+
+        .view-controls {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 5px; z-index: 1000; background: rgba(0,0,0,0.4);
+            padding: 8px; border-radius: 40px; backdrop-filter: blur(10px);
         }
 
-        button:hover { background: var(--primary); color: black; box-shadow: 0 0 15px var(--primary); }
-        button.active { background: var(--primary); color: black; }
+        button {
+            background: transparent; border: 1px solid #30363d; color: white;
+            padding: 10px 22px; border-radius: 30px; cursor: pointer;
+            font-size: 12px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
 
-        #coords { font-family: monospace; color: var(--primary); margin-bottom: 10px; display: block; }
+        button:hover { border-color: var(--neon); background: rgba(0,255,157,0.1); }
+        button.active { background: var(--neon); color: #010409; font-weight: bold; }
+        
+        .gps-btn { border-color: var(--warning); color: var(--warning); }
+        .gps-active { background: var(--warning); color: white; }
     </style>
 </head>
 <body>
 
-<div class="interface">
-    <div class="hud">
-        <span id="coords">Lat: 0.000 | Lon: 0.000</span>
-        <div class="controls">
-            <button onclick="showMode('map')" id="btn-map">2D Map</button>
-            <button onclick="showMode('three')" id="btn-three">3D Globe</button>
-            <button onclick="showMode('babylon')" id="btn-babylon">Sim</button>
-            <button onclick="toggleGPS()" id="btn-gps" style="border-color: #ff4757; color: #ff4757;">Start GPS</button>
-        </div>
-    </div>
+<div class="hud">
+    <div style="font-weight:bold; margin-bottom:15px; letter-spacing: 2px;">NEXUS TELEMETRY</div>
+    <div id="entity-list"></div>
+</div>
+
+<div class="view-controls">
+    <button onclick="Nexus.setView('map')" id="btn-map">Tactical 2D</button>
+    <button onclick="Nexus.setView('three')" id="btn-three">Orbital 3D</button>
+    <button onclick="Nexus.setView('babylon')" id="btn-babylon">Sim Grid</button>
+    <button onclick="Nexus.toggleGPS()" id="btn-gps" class="gps-btn">GPS: OFF</button>
 </div>
 
 <div id="map"></div>
-<canvas id="threeCanvas"></canvas>
-<canvas id="babylonCanvas"></canvas>
+<canvas id="three"></canvas>
+<canvas id="babylon"></canvas>
 
-<!-- LIBS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 
 <script>
-let state = { lat: 0, lon: 0, active: false, mode: 'map' };
-let gpsWatchId = null;
+/** 
+ * NEXUS CORE ENGINE
+ * Reactive Architecture with Engine Subscriptions
+ */
+const Nexus = (() => {
+    const state = {
+        entities: new Map(),
+        subscribers: [],
+        view: 'map',
+        gpsWatch: null
+    };
 
-/* --- UI LOGIC --- */
-function showMode(mode){
-    state.mode = mode;
-    [mapDiv, threeCanvas, babylonCanvas].forEach(el => el.style.display = 'none');
-    document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
-    
-    if(mode === 'map') { mapDiv.style.display = 'block'; document.getElementById('btn-map').classList.add('active'); }
-    if(mode === 'three') { threeCanvas.style.display = 'block'; document.getElementById('btn-three').classList.add('active'); }
-    if(mode === 'babylon') { babylonCanvas.style.display = 'block'; document.getElementById('btn-babylon').classList.add('active'); }
-    resizeAll();
-}
+    const notify = () => state.subscribers.forEach(fn => fn(state));
 
-/* --- LEAFLET (DARK MODE) --- */
-const mapDiv = document.getElementById("map");
-let map = L.map(mapDiv).setView([20,0], 2);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; CartoDB'
-}).addTo(map);
-let marker = L.circleMarker([0,0], {color: '#00f2ff', radius: 10}).addTo(map);
+    return {
+        subscribe: (fn) => state.subscribers.push(fn),
+        
+        updateEntity: (id, data) => {
+            const existing = state.entities.get(id) || {};
+            state.entities.set(id, { ...existing, ...data, lastUpdate: Date.now() });
+            notify();
+            Nexus.updateHUD();
+        },
 
-/* --- THREE.JS (IMPROVED GLOBE) --- */
-let scene = new THREE.Scene();
-let camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-let renderer = new THREE.WebGLRenderer({canvas: threeCanvas, antialias: true});
-renderer.setSize(window.innerWidth, window.innerHeight);
+        setView: (v) => {
+            state.view = v;
+            document.querySelectorAll('#map, #three, #babylon').forEach(el => el.classList.remove('visible'));
+            document.getElementById(v).classList.add('visible');
+            document.querySelectorAll('.view-controls button').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`btn-${v}`).classList.add('active');
+            notify();
+        },
 
-// Better Globe with Shading
-let globeGroup = new THREE.Group();
-let earth = new THREE.Mesh(
+        updateHUD: () => {
+            const list = document.getElementById('entity-list');
+            list.innerHTML = '';
+            state.entities.forEach((e, id) => {
+                list.innerHTML += `
+                    <div class="entity-card">
+                        <div style="color:white; margin-bottom:4px;">[${id.toUpperCase()}]</div>
+                        <div><span class="label">LAT:</span><span class="val">${e.lat.toFixed(4)}</span></div>
+                        <div><span class="label">LON:</span><span class="val">${e.lon.toFixed(4)}</span></div>
+                    </div>`;
+            });
+        },
+
+        toggleGPS: () => {
+            const btn = document.getElementById('btn-gps');
+            if (state.gpsWatch) {
+                navigator.geolocation.clearWatch(state.gpsWatch);
+                state.gpsWatch = null;
+                btn.innerText = "GPS: OFF";
+                btn.classList.remove('gps-active');
+            } else {
+                state.gpsWatch = navigator.geolocation.watchPosition(p => {
+                    Nexus.updateEntity('user', { lat: p.coords.latitude, lon: p.coords.longitude });
+                }, null, { enableHighAccuracy: true });
+                btn.innerText = "GPS: LIVE";
+                btn.classList.add('gps-active');
+            }
+        }
+    };
+})();
+
+/* --- LEAFLET ADAPTER --- */
+const map = L.map('map', { zoomControl: false }).setView([0,0], 2);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+const lMarkers = new Map();
+
+Nexus.subscribe(state => {
+    if (state.view !== 'map') return;
+    state.entities.forEach((e, id) => {
+        if (!lMarkers.has(id)) {
+            lMarkers.set(id, L.circleMarker([e.lat, e.lon], { color: id === 'user' ? '#00ff9d' : '#ff4757', radius: 6 }).addTo(map));
+        } else {
+            lMarkers.get(id).setLatLng([e.lat, e.lon]);
+        }
+    });
+});
+
+/* --- THREE.JS ADAPTER --- */
+const tScene = new THREE.Scene();
+const tCam = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+const tRenderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three'), antialias: true });
+tRenderer.setSize(innerWidth, innerHeight);
+
+const globe = new THREE.Mesh(
     new THREE.SphereGeometry(2, 64, 64),
     new THREE.MeshStandardMaterial({ 
-        map: new THREE.TextureLoader().load('https://unpkg.com/three-globe/example/img/earth-dark.jpg'),
-        metalness: 0.4, roughness: 0.7
+        map: new THREE.TextureLoader().load('https://unpkg.com/three-globe/example/img/earth-night.jpg'),
+        emissive: new THREE.Color(0x00ff9d), emissiveIntensity: 0.1
     })
 );
-globeGroup.add(earth);
-scene.add(globeGroup);
-scene.add(new THREE.AmbientLight(0x404040, 2));
-let sun = new THREE.DirectionalLight(0xffffff, 3);
-sun.position.set(5,3,5);
-scene.add(sun);
+tScene.add(globe);
+tScene.add(new THREE.AmbientLight(0xffffff, 2));
+tCam.position.z = 5;
 
-let userPointer = new THREE.Mesh(
-    new THREE.SphereGeometry(0.06, 16, 16),
-    new THREE.MeshBasicMaterial({color: 0x00f2ff})
-);
-globeGroup.add(userPointer);
-camera.position.z = 5;
+const tDots = new Map();
 
-function updateThree(lat, lon) {
-    const phi = (90 - lat) * (Math.PI / 180);
-    const theta = (lon + 180) * (Math.PI / 180);
-    userPointer.position.set(
-        -2 * Math.sin(phi) * Math.cos(theta),
-        2 * Math.cos(phi),
-        2 * Math.sin(phi) * Math.sin(theta)
-    );
-    // Smoothly rotate globe to face user
-    globeGroup.rotation.y = -theta + Math.PI/2;
-    globeGroup.rotation.x = phi - Math.PI/2;
-}
+Nexus.subscribe(state => {
+    if (state.view !== 'three') return;
+    state.entities.forEach((e, id) => {
+        if (!tDots.has(id)) {
+            const dot = new THREE.Mesh(new THREE.SphereGeometry(0.04), new THREE.MeshBasicMaterial({color: id === 'user' ? 0x00ff9d : 0xff4757}));
+            globe.add(dot);
+            tDots.set(id, dot);
+        }
+        const phi = (90 - e.lat) * (Math.PI / 180);
+        const theta = (e.lon + 180) * (Math.PI / 180);
+        tDots.get(id).position.set(-2.01 * Math.sin(phi) * Math.cos(theta), 2.01 * Math.cos(phi), 2.01 * Math.sin(phi) * Math.sin(theta));
+    });
+});
 
-function animateThree() {
-    requestAnimationFrame(animateThree);
-    if(state.mode === 'three') renderer.render(scene, camera);
-}
-animateThree();
-
-/* --- BABYLON (GRID SIM) --- */
-let bEngine = new BABYLON.Engine(babylonCanvas, true);
-let bScene = new BABYLON.Scene(bEngine);
-bScene.clearColor = new BABYLON.Color4(0.02, 0.02, 0.02, 1);
-let bCam = new BABYLON.ArcRotateCamera("c", -Math.PI/2, Math.PI/2.5, 10, BABYLON.Vector3.Zero(), bScene);
-bCam.attachControl(babylonCanvas, true);
-let bLight = new BABYLON.HemisphericLight("l", new BABYLON.Vector3(0,1,0), bScene);
-let grid = BABYLON.MeshBuilder.CreateGround("g", {width:100, height:100, subdivisions: 20}, bScene);
-let gridMat = new BABYLON.StandardMaterial("gm", bScene);
-gridMat.wireframe = true; gridMat.diffuseColor = new BABYLON.Color3(0, 0.4, 0.6);
-grid.material = gridMat;
-
-let player = BABYLON.MeshBuilder.CreateBox("p", {size: 1}, bScene);
-player.material = new BABYLON.StandardMaterial("pm", bScene);
-player.material.emissiveColor = new BABYLON.Color3(0, 1, 1);
-
-function updateBabylon(lat, lon) {
-    // Relative movement simulation
-    player.position.x = (lon % 1) * 100; 
-    player.position.z = (lat % 1) * 100;
-}
-bEngine.runRenderLoop(() => { if(state.mode === 'babylon') bScene.render(); });
-
-/* --- CORE GPS LOGIC --- */
-function toggleGPS() {
-    const btn = document.getElementById('btn-gps');
-    if(state.active) {
-        navigator.geolocation.clearWatch(gpsWatchId);
-        state.active = false;
-        btn.innerText = "Start GPS";
-        btn.style.borderColor = "#ff4757";
-    } else {
-        gpsWatchId = navigator.geolocation.watchPosition(p => {
-            const {latitude, longitude} = p.coords;
-            state.lat = latitude; state.lon = longitude;
-            document.getElementById('coords').innerText = `Lat: ${latitude.toFixed(4)} | Lon: ${longitude.toFixed(4)}`;
-            
-            marker.setLatLng([latitude, longitude]);
-            if(!state.active) map.setView([latitude, longitude], 15);
-            
-            updateThree(latitude, longitude);
-            updateBabylon(latitude, longitude);
-            state.active = true;
-        }, err => alert(err.message), {enableHighAccuracy: true});
-        
-        btn.innerText = "GPS Active";
-        btn.style.borderColor = "#2ecc71";
+function tAnimate() {
+    requestAnimationFrame(tAnimate);
+    if (document.getElementById('three').classList.contains('visible')) {
+        globe.rotation.y += 0.001;
+        tRenderer.render(tScene, tCam);
     }
 }
+tAnimate();
 
-function resizeAll() {
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    bEngine.resize();
-    map.invalidateSize();
-}
-window.addEventListener("resize", resizeAll);
-showMode('map');
+/* --- BABYLON ADAPTER --- */
+const bCanvas = document.getElementById("babylon");
+const bEngine = new BABYLON.Engine(bCanvas, true);
+const bScene = new BABYLON.Scene(bEngine);
+bScene.clearColor = new BABYLON.Color4(0,0,0,1);
+const bCam = new BABYLON.ArcRotateCamera("c", 1.5, 1.2, 20, BABYLON.Vector3.Zero(), bScene);
+bCam.attachControl(bCanvas, true);
+new BABYLON.HemisphericLight("l", new BABYLON.Vector3(0,1,0), bScene);
+
+const bMeshes = new Map();
+
+Nexus.subscribe(state => {
+    if (state.view !== 'babylon') return;
+    state.entities.forEach((e, id) => {
+        if (!bMeshes.has(id)) {
+            const box = BABYLON.MeshBuilder.CreateBox(id, {size: 1}, bScene);
+            box.material = new BABYLON.StandardMaterial("m", bScene);
+            box.material.emissiveColor = id === 'user' ? new BABYLON.Color3(0,1,0.6) : new BABYLON.Color3(1,0,0);
+            bMeshes.set(id, box);
+        }
+        bMeshes.get(id).position.x = e.lon;
+        bMeshes.get(id).position.z = e.lat;
+    });
+});
+
+bEngine.runRenderLoop(() => { if (bCanvas.classList.contains('visible')) bScene.render(); });
+
+/* --- EXTERNAL DATA SOURCES --- */
+// Simulated ISS
+setInterval(() => {
+    fetch('https://api.open-notify.org/iss-now.json')
+        .then(r => r.json())
+        .then(d => Nexus.updateEntity('iss', { lat: parseFloat(d.iss_position.latitude), lon: parseFloat(d.iss_position.longitude) }));
+}, 3000);
+
+// App Init
+Nexus.setView('map');
+window.onresize = () => { tRenderer.setSize(innerWidth, innerHeight); bEngine.resize(); };
 </script>
 </body>
 </html>
