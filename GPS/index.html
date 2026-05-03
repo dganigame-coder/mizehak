@@ -2,70 +2,37 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Live Air Traffic Explorer</title>
+<title>Live Aircraft Map FIXED</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
 <style>
-body,html{
-  margin:0;
-  height:100%;
-  overflow:hidden;
-  font-family:monospace;
-  background:#050814;
-}
+body,html{margin:0;height:100%;overflow:hidden;background:#050814;font-family:monospace}
+#map{position:absolute;width:100%;height:100%}
 
-#map{
-  position:absolute;
-  width:100%;
-  height:100%;
-}
-
-#panel{
-  position:absolute;
-  top:10px;
-  left:10px;
-  width:260px;
-  background:rgba(0,0,0,0.85);
-  color:#e5e7eb;
-  padding:10px;
+.panel{
+  position:absolute;top:10px;left:10px;
   z-index:9999;
+  background:rgba(0,0,0,0.8);
+  padding:10px;
+  width:240px;
   border-left:3px solid #00ff9d;
-}
-
-#panel h3{
-  margin:0 0 8px 0;
-  color:#00ff9d;
-}
-
-.row{
-  margin:4px 0;
+  color:white;
   font-size:12px;
 }
 
-.label{color:#94a3b8}
-.value{color:#ffffff}
-
-button{
-  margin-top:8px;
-  width:100%;
-  padding:6px;
-  background:#111;
-  color:white;
-  border:1px solid #333;
-  cursor:pointer;
-}
-
+.status{color:#00ff9d;margin-top:6px}
+button{margin-top:6px;width:100%;padding:6px;background:#111;color:white;border:1px solid #333;cursor:pointer}
 button:hover{border-color:#00ff9d}
 </style>
 </head>
 
 <body>
 
-<div id="panel">
-<h3>✈ AIR INTEL</h3>
-<div id="info">Click an aircraft</div>
-<button onclick="clearSelection()">Clear</button>
+<div class="panel">
+<b>✈ AIR TRAFFIC FIXED</b>
+<div class="status" id="status">loading...</div>
+<button onclick="reload()">Reload</button>
 </div>
 
 <div id="map"></div>
@@ -73,104 +40,74 @@ button:hover{border-color:#00ff9d}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-/* =========================
-   MAP INIT
-========================= */
 const map = L.map("map").setView([20,0],2);
 
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
-  attribution:"OpenStreetMap"
+  attribution:"OSM"
 }).addTo(map);
 
-/* =========================
-   STATE
-========================= */
 const planes = new Map();
-let selected = null;
 
 /* =========================
-   CLICK PANEL
+   CORS PROXY FIX
 ========================= */
-function showInfo(p){
-  document.getElementById("info").innerHTML = `
-    <div class="row"><span class="label">CALLSIGN:</span> <span class="value">${p.callsign || "N/A"}</span></div>
-    <div class="row"><span class="label">COUNTRY:</span> <span class="value">${p.country || "Unknown"}</span></div>
-    <div class="row"><span class="label">ALT:</span> <span class="value">${p.altitude || "?"} m</span></div>
-    <div class="row"><span class="label">SPD:</span> <span class="value">${p.velocity || "?"} m/s</span></div>
-    <div class="row"><span class="label">HDG:</span> <span class="value">${p.heading || "?"}</span></div>
-    <div class="row"><span class="label">ICAO:</span> <span class="value">${p.icao}</span></div>
-  `;
-}
-
-function clearSelection(){
-  selected = null;
-  document.getElementById("info").innerHTML = "Click an aircraft";
-}
+const API =
+  "https://api.allorigins.win/raw?url=" +
+  encodeURIComponent("https://opensky-network.org/api/states/all");
 
 /* =========================
-   AIRCRAFT FETCH
+   LOAD AIRCRAFT
 ========================= */
-async function loadAircraft(){
+async function load(){
 
   try{
-    const res = await fetch("https://opensky-network.org/api/states/all");
+    const res = await fetch(API);
     const data = await res.json();
 
-    if(!data.states) return;
+    if(!data.states){
+      document.getElementById("status").innerText = "no aircraft data";
+      return;
+    }
 
     data.states.slice(0,80).forEach(s => {
 
-      const plane = {
-        icao: s[0],
-        callsign: s[1]?.trim(),
-        country: s[2],
-        lon: s[5],
-        lat: s[6],
-        altitude: s[7],
-        velocity: s[9],
-        heading: s[10]
-      };
+      const id = s[0];
+      const lat = s[6];
+      const lon = s[5];
 
-      if(!plane.lat || !plane.lon) return;
+      if(!lat || !lon) return;
 
-      /* create marker */
-      if(!planes.has(plane.icao)){
-
-        const marker = L.circleMarker([plane.lat, plane.lon], {
-          radius:4,
-          color:"#00ff9d"
-        }).addTo(map);
-
-        marker.on("click", () => {
-          selected = plane;
-          showInfo(plane);
-        });
-
-        planes.set(plane.icao, { marker, data: plane });
-
+      if(!planes.has(id)){
+        planes.set(id,
+          L.circleMarker([lat,lon],{
+            radius:3,
+            color:"#00ff9d"
+          }).addTo(map)
+        );
       } else {
-        const obj = planes.get(plane.icao);
-
-        obj.data = plane;
-        obj.marker.setLatLng([plane.lat, plane.lon]);
-
-        /* update selection live */
-        if(selected && selected.icao === plane.icao){
-          showInfo(plane);
-        }
+        planes.get(id).setLatLng([lat,lon]);
       }
     });
 
+    document.getElementById("status").innerText =
+      "aircraft live ✔";
+
   } catch(e){
-    console.log("API error (OpenSky may limit requests)");
+    document.getElementById("status").innerText =
+      "API blocked (proxy failed)";
+    console.log(e);
   }
 }
 
 /* =========================
-   AUTO UPDATE LOOP
+   AUTO REFRESH
 ========================= */
-setInterval(loadAircraft, 4000);
-loadAircraft();
+function reload(){
+  load();
+}
+
+load();
+setInterval(load, 5000);
 
 </script>
 
