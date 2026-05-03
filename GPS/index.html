@@ -2,49 +2,70 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Open Earth Intelligence Map</title>
+<title>Live Air Traffic Explorer</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
 <style>
-body,html{margin:0;height:100%;overflow:hidden;background:#050814;color:#e5e7eb;font-family:monospace}
-#map{position:absolute;width:100%;height:100%}
-
-.panel{
-    position:absolute;top:10px;left:10px;
-    background:rgba(0,0,0,0.75);
-    padding:10px;
-    z-index:9999;
-    border-left:3px solid #00ff9d;
-    font-size:12px;
-    width:240px;
+body,html{
+  margin:0;
+  height:100%;
+  overflow:hidden;
+  font-family:monospace;
+  background:#050814;
 }
+
+#map{
+  position:absolute;
+  width:100%;
+  height:100%;
+}
+
+#panel{
+  position:absolute;
+  top:10px;
+  left:10px;
+  width:260px;
+  background:rgba(0,0,0,0.85);
+  color:#e5e7eb;
+  padding:10px;
+  z-index:9999;
+  border-left:3px solid #00ff9d;
+}
+
+#panel h3{
+  margin:0 0 8px 0;
+  color:#00ff9d;
+}
+
+.row{
+  margin:4px 0;
+  font-size:12px;
+}
+
+.label{color:#94a3b8}
+.value{color:#ffffff}
 
 button{
-    margin:3px;
-    padding:6px 10px;
-    background:#111;
-    border:1px solid #333;
-    color:white;
-    cursor:pointer;
+  margin-top:8px;
+  width:100%;
+  padding:6px;
+  background:#111;
+  color:white;
+  border:1px solid #333;
+  cursor:pointer;
 }
-button:hover{border-color:#00ff9d}
 
-.status{color:#00ff9d;margin-top:6px}
+button:hover{border-color:#00ff9d}
 </style>
 </head>
 
 <body>
 
-<div class="panel">
-<b>OPEN EARTH INTEL</b><br><br>
-
-<button onclick="toggle('air')">✈ Air</button>
-<button onclick="toggle('iss')">🛰 ISS</button>
-<button onclick="toggle('quake')">🌍 Quakes</button>
-<button onclick="toggle('sat')">🛰 Sat</button>
-
-<div class="status" id="status">booting...</div>
+<div id="panel">
+<h3>✈ AIR INTEL</h3>
+<div id="info">Click an aircraft</div>
+<button onclick="clearSelection()">Clear</button>
 </div>
 
 <div id="map"></div>
@@ -53,158 +74,103 @@ button:hover{border-color:#00ff9d}
 
 <script>
 /* =========================
-   MAP
+   MAP INIT
 ========================= */
 const map = L.map("map").setView([20,0],2);
 
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
-    attribution:"OpenStreetMap"
+  attribution:"OpenStreetMap"
 }).addTo(map);
 
 /* =========================
    STATE
 ========================= */
-const S = {
-    air:true,
-    iss:true,
-    quake:true,
-    sat:true,
-    cache:{
-        planes:new Map(),
-        iss:null,
-        quakes:new Map(),
-        sats:new Map()
-    }
-};
+const planes = new Map();
+let selected = null;
 
 /* =========================
-   TOGGLE
+   CLICK PANEL
 ========================= */
-function toggle(k){
-    S[k]=!S[k];
+function showInfo(p){
+  document.getElementById("info").innerHTML = `
+    <div class="row"><span class="label">CALLSIGN:</span> <span class="value">${p.callsign || "N/A"}</span></div>
+    <div class="row"><span class="label">COUNTRY:</span> <span class="value">${p.country || "Unknown"}</span></div>
+    <div class="row"><span class="label">ALT:</span> <span class="value">${p.altitude || "?"} m</span></div>
+    <div class="row"><span class="label">SPD:</span> <span class="value">${p.velocity || "?"} m/s</span></div>
+    <div class="row"><span class="label">HDG:</span> <span class="value">${p.heading || "?"}</span></div>
+    <div class="row"><span class="label">ICAO:</span> <span class="value">${p.icao}</span></div>
+  `;
+}
+
+function clearSelection(){
+  selected = null;
+  document.getElementById("info").innerHTML = "Click an aircraft";
 }
 
 /* =========================
-   ✈ AIRCRAFT (OPEN SKY)
+   AIRCRAFT FETCH
 ========================= */
-async function air(){
+async function loadAircraft(){
 
-    try{
-        const r = await fetch("https://opensky-network.org/api/states/all");
-        const d = await r.json();
+  try{
+    const res = await fetch("https://opensky-network.org/api/states/all");
+    const data = await res.json();
 
-        if(!d.states) return;
+    if(!data.states) return;
 
-        d.states.slice(0,50).forEach(s=>{
+    data.states.slice(0,80).forEach(s => {
 
-            const id=s[0], lon=s[5], lat=s[6];
-            if(!lat||!lon) return;
+      const plane = {
+        icao: s[0],
+        callsign: s[1]?.trim(),
+        country: s[2],
+        lon: s[5],
+        lat: s[6],
+        altitude: s[7],
+        velocity: s[9],
+        heading: s[10]
+      };
 
-            if(!S.cache.planes.has(id)){
-                S.cache.planes.set(id,
-                    L.circleMarker([lat,lon],{
-                        radius:3,color:"#00ff9d"
-                    }).addTo(map)
-                );
-            }else{
-                S.cache.planes.get(id).setLatLng([lat,lon]);
-            }
+      if(!plane.lat || !plane.lon) return;
+
+      /* create marker */
+      if(!planes.has(plane.icao)){
+
+        const marker = L.circleMarker([plane.lat, plane.lon], {
+          radius:4,
+          color:"#00ff9d"
+        }).addTo(map);
+
+        marker.on("click", () => {
+          selected = plane;
+          showInfo(plane);
         });
 
-        document.getElementById("status").innerText="air live";
+        planes.set(plane.icao, { marker, data: plane });
 
-    }catch(e){}
-}
+      } else {
+        const obj = planes.get(plane.icao);
 
-/* =========================
-   🛰 ISS (OPEN API)
-========================= */
-async function iss(){
+        obj.data = plane;
+        obj.marker.setLatLng([plane.lat, plane.lon]);
 
-    try{
-        const r = await fetch("https://api.open-notify.org/iss-now.json");
-        const d = await r.json();
-
-        const lat=parseFloat(d.iss_position.latitude);
-        const lon=parseFloat(d.iss_position.longitude);
-
-        if(!S.cache.iss){
-            S.cache.iss = L.circleMarker([lat,lon],{
-                radius:6,color:"red"
-            }).addTo(map);
-        }else{
-            S.cache.iss.setLatLng([lat,lon]);
+        /* update selection live */
+        if(selected && selected.icao === plane.icao){
+          showInfo(plane);
         }
+      }
+    });
 
-    }catch(e){}
+  } catch(e){
+    console.log("API error (OpenSky may limit requests)");
+  }
 }
 
 /* =========================
-   🌍 EARTHQUAKES (USGS REAL)
+   AUTO UPDATE LOOP
 ========================= */
-async function quake(){
-
-    try{
-        const r = await fetch("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson");
-        const d = await r.json();
-
-        d.features.forEach(q=>{
-
-            const id=q.id;
-            const c=q.geometry.coordinates;
-
-            const lon=c[0], lat=c[1], mag=q.properties.mag;
-
-            if(!S.cache.quakes.has(id)){
-                S.cache.quakes.set(id,
-                    L.circleMarker([lat,lon],{
-                        radius:mag*2,
-                        color:"#ff4757"
-                    }).addTo(map)
-                );
-            }
-        });
-
-        document.getElementById("status").innerText="quake live";
-
-    }catch(e){}
-}
-
-/* =========================
-   🛰 SATELLITES (TLE SIMULATION)
-   Using ISS-style propagation approximation
-========================= */
-let satAngle = 0;
-
-function sat(){
-
-    satAngle += 0.01;
-
-    const lat = 20 + Math.sin(satAngle)*60;
-    const lon = 20 + Math.cos(satAngle)*120;
-
-    if(!S.cache.sats.has("sat1")){
-        S.cache.sats.set("sat1",
-            L.circleMarker([lat,lon],{
-                radius:4,color:"#3b82f6"
-            }).addTo(map)
-        );
-    }else{
-        S.cache.sats.get("sat1").setLatLng([lat,lon]);
-    }
-}
-
-/* =========================
-   LOOP
-========================= */
-setInterval(()=>{
-
-    if(S.air) air();
-    if(S.iss) iss();
-    if(S.quake) quake();
-    if(S.sat) sat();
-
-},3000);
+setInterval(loadAircraft, 4000);
+loadAircraft();
 
 </script>
 
