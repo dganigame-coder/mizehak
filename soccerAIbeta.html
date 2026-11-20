@@ -1,0 +1,3256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>FIFA World Cup 4K WebGL — Rublix AI Tactical Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #05080f;
+      font-family: 'Inter', sans-serif;
+      color: #f8fafc;
+    }
+    .font-broadcast { font-family: 'Oswald', sans-serif; }
+    canvas#gameCanvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      touch-action: none;
+    }
+    /* Custom scrollbar for 211+ nations list */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+    ::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.45); border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.8); }
+
+    .glass-panel {
+      background: linear-gradient(145deg, rgba(11, 18, 34, 0.90), rgba(7, 12, 24, 0.95));
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+    }
+    .broadcast-badge {
+      background: linear-gradient(90deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+      border: 1px solid rgba(255,255,255,0.16);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 15px rgba(16, 185, 129, 0.35); }
+      50% { box-shadow: 0 0 28px rgba(16, 185, 129, 0.75); }
+    }
+    .glow-emerald { animation: pulseGlow 2.4s infinite; }
+
+    @keyframes goalBannerAnim {
+      0% { transform: scale(0.65) translateY(30px); opacity: 0; letter-spacing: 0.45em; }
+      18% { transform: scale(1.06) translateY(0); opacity: 1; letter-spacing: 0.18em; }
+      85% { transform: scale(1) translateY(0); opacity: 1; letter-spacing: 0.15em; }
+      100% { transform: scale(1.08) translateY(-15px); opacity: 0; }
+    }
+    .goal-banner-active {
+      animation: goalBannerAnim 3.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    .touch-btn {
+      background: rgba(15, 23, 42, 0.72);
+      border: 1.5px solid rgba(255, 255, 255, 0.22);
+      backdrop-filter: blur(8px);
+      transition: transform 0.08s ease, background 0.12s ease;
+    }
+    .touch-btn:active, .touch-btn.pressed {
+      transform: scale(0.91);
+      background: rgba(14, 165, 233, 0.55);
+      border-color: #38bdf8;
+    }
+  </style>
+</head>
+<body>
+  <!-- 3D WebGL Viewport -->
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- TOP BROADCAST HUD BAR (Always accessible) -->
+  <div id="topHud" class="fixed top-0 left-0 right-0 z-30 pointer-events-none px-3 pt-2.5 sm:px-5 sm:pt-3.5 flex flex-wrap items-start justify-between gap-2">
+    <!-- Left: TV Broadcast Scorebug -->
+    <div id="scorebug" class="pointer-events-auto broadcast-badge rounded-xl overflow-hidden flex items-stretch text-xs sm:text-sm">
+      <div class="bg-gradient-to-b from-emerald-500 to-emerald-700 px-2.5 py-1.5 flex flex-col items-center justify-center font-broadcast font-bold text-slate-950 tracking-wider">
+        <span class="text-[9px] uppercase leading-none opacity-85">WC 4K</span>
+        <span id="hudClock" class="text-sm sm:text-base leading-tight">00:00</span>
+      </div>
+      <!-- Home Team -->
+      <div class="flex items-center gap-2 px-2.5 sm:px-3.5 py-1.5 border-r border-white/10">
+        <span id="hudHomeColor" class="w-2.5 h-5 rounded-sm border border-white/30"></span>
+        <span id="hudHomeFlag" class="text-base sm:text-lg leading-none">🇦🇷</span>
+        <span id="hudHomeCode" class="font-broadcast font-bold tracking-wider text-sm sm:text-base">ARG</span>
+        <span id="hudHomeScore" class="font-broadcast font-extrabold text-lg sm:text-xl text-amber-400 ml-1">0</span>
+      </div>
+      <!-- Away Team -->
+      <div class="flex items-center gap-2 px-2.5 sm:px-3.5 py-1.5">
+        <span id="hudAwayScore" class="font-broadcast font-extrabold text-lg sm:text-xl text-amber-400 mr-1">0</span>
+        <span id="hudAwayCode" class="font-broadcast font-bold tracking-wider text-sm sm:text-base">FRA</span>
+        <span id="hudAwayFlag" class="text-base sm:text-lg leading-none">🇫🇷</span>
+        <span id="hudAwayColor" class="w-2.5 h-5 rounded-sm border border-white/30"></span>
+      </div>
+      <!-- Half / Replay Pill -->
+      <div id="hudPeriod" class="hidden md:flex items-center px-2.5 bg-slate-900/90 text-[11px] font-semibold text-sky-300 border-l border-white/10">
+        1ST HALF
+      </div>
+    </div>
+
+    <!-- Center: Live Possession / AI Tactical Telemetry Pill -->
+    <div id="liveCommentaryPill" class="hidden lg:flex pointer-events-auto glass-panel rounded-full px-4 py-1.5 items-center gap-2.5 text-xs text-slate-200 max-w-md truncate">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+      <span id="liveCommentaryText" class="truncate font-medium">Select nations or launch World Cup kickoff with Rublix AI Scouting.</span>
+    </div>
+
+    <!-- Right: Quick Controls + Rublix API Key Drawer Button -->
+    <div class="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+      <!-- Resolution Selector -->
+      <select id="resSelector" title="WebGL Render Scale" class="glass-panel rounded-xl px-2.5 py-2 text-xs font-semibold text-sky-300 focus:outline-none cursor-pointer">
+        <option value="1">1080p HD</option>
+        <option value="1.5" selected>1440p QHD</option>
+        <option value="2">4K ULTRA</option>
+      </select>
+
+      <!-- Camera Angle Switcher -->
+      <button id="btnCamera" class="glass-panel hover:bg-slate-800/90 rounded-xl px-2.5 sm:px-3 py-2 text-xs font-semibold flex items-center gap-1.5 text-slate-100 transition">
+        <span>🎥</span>
+        <span id="camLabel" class="hidden sm:inline">Tele Broadcast</span>
+      </button>
+
+      <!-- Sound Toggle -->
+      <button id="btnAudio" class="glass-panel hover:bg-slate-800/90 rounded-xl p-2 text-xs font-semibold text-slate-100 transition" title="Toggle Stadium Audio">
+        🔊
+      </button>
+
+      <!-- Rublix API Key Button -->
+      <button id="btnOpenRublix" class="glass-panel hover:border-amber-400/60 border-amber-400/30 rounded-xl px-3 py-2 text-xs font-bold flex items-center gap-1.5 text-amber-300 transition shadow-lg">
+        <span>🔑</span>
+        <span>Rublix AI</span>
+        <span id="rublixBadgeDot" class="w-2 h-2 rounded-full bg-amber-400"></span>
+      </button>
+
+      <!-- Match Lobby / Pause Button -->
+      <button id="btnToggleLobby" class="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl px-3 py-2 text-xs transition shadow-lg">
+        ⚙️ Teams
+      </button>
+    </div>
+  </div>
+
+  <!-- GOAL / REPLAY OVERLAY BANNER -->
+  <div id="goalOverlay" class="fixed inset-0 z-20 pointer-events-none hidden flex-col items-center justify-center">
+    <div id="goalBannerBox" class="px-10 py-6 rounded-3xl bg-gradient-to-r from-amber-500/90 via-yellow-400/95 to-amber-500/90 text-slate-950 shadow-2xl border-2 border-white/70 text-center">
+      <div class="text-xs sm:text-sm font-black uppercase tracking-[0.35em] mb-1">WORLD CUP BROADCAST</div>
+      <div id="goalBannerTitle" class="font-broadcast text-5xl sm:text-7xl font-black uppercase tracking-widest">GOAL!</div>
+      <div id="goalBannerSub" class="text-sm sm:text-lg font-extrabold mt-1">ARGENTINA 1 - 0 FRANCE</div>
+    </div>
+  </div>
+
+  <!-- REPLAY INDICATOR -->
+  <div id="replayIndicator" class="fixed top-20 left-1/2 -translate-x-1/2 z-20 hidden pointer-events-none">
+    <div class="bg-rose-600/90 border border-white/40 text-white px-4 py-1 rounded-full text-xs font-black tracking-widest uppercase flex items-center gap-2 shadow-xl">
+      <span class="w-2.5 h-2.5 rounded-full bg-white animate-ping"></span>
+      <span>4K INSTANT SLOW-MO REPLAY</span>
+    </div>
+  </div>
+
+  <!-- SET-PIECE / REFEREE WHISTLE BROADCAST CALLOUT -->
+  <div id="setPieceBanner" class="fixed top-20 left-1/2 -translate-x-1/2 z-20 hidden pointer-events-none">
+    <div class="broadcast-badge px-5 py-2 rounded-2xl border border-amber-400/50 flex items-center gap-3 shadow-2xl">
+      <span id="setPieceIcon" class="text-xl">🏁</span>
+      <div>
+        <div id="setPieceTitle" class="font-broadcast text-base sm:text-lg font-bold tracking-wider text-amber-300 uppercase leading-none">THROW-IN</div>
+        <div id="setPieceSub" class="text-[11px] font-semibold text-slate-200 mt-0.5">Argentina possession on the touchline</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HALF-TIME & FULL-TIME BROADCAST SUMMARY MODAL -->
+  <div id="matchPeriodModal" class="fixed inset-0 z-40 hidden bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="glass-panel rounded-3xl max-w-lg w-full p-6 border border-white/15 text-center shadow-2xl">
+      <div id="periodBadge" class="inline-block px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs font-black uppercase tracking-widest mb-2">
+        HALF-TIME • 45:00
+      </div>
+      <h2 id="periodHeading" class="font-broadcast text-3xl sm:text-4xl font-bold text-white tracking-wide">
+        END OF FIRST HALF
+      </h2>
+      <div class="my-5 bg-slate-900/85 rounded-2xl p-4 border border-white/10 flex items-center justify-around">
+        <div class="text-center">
+          <div id="ftHomeFlag" class="text-4xl mb-1">🇦🇷</div>
+          <div id="ftHomeName" class="font-broadcast font-bold text-lg text-white">ARG</div>
+        </div>
+        <div class="font-broadcast text-4xl sm:text-5xl font-black text-amber-400 tracking-wider">
+          <span id="ftHomeScore">0</span> - <span id="ftAwayScore">0</span>
+        </div>
+        <div class="text-center">
+          <div id="ftAwayFlag" class="text-4xl mb-1">🇫🇷</div>
+          <div id="ftAwayName" class="font-broadcast font-bold text-lg text-white">FRA</div>
+        </div>
+      </div>
+      <p id="periodSubtext" class="text-xs text-slate-300 mb-5">
+        Teams are switching ends for the second half. Tactical adjustments applied.
+      </p>
+      <div class="flex flex-wrap items-center justify-center gap-3">
+        <button id="btnResumeSecondHalf" class="glow-emerald bg-gradient-to-r from-emerald-400 to-sky-400 text-slate-950 font-broadcast text-lg font-bold tracking-wider px-6 py-2.5 rounded-2xl shadow-xl cursor-pointer">
+          ▶ START 2ND HALF (45:00)
+        </button>
+        <button id="btnRematch" class="hidden bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-broadcast text-lg font-bold tracking-wider px-6 py-2.5 rounded-2xl shadow-xl cursor-pointer">
+          🔄 PLAY REMATCH
+        </button>
+        <button id="btnBackToLobby" class="hidden bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-5 py-3 rounded-2xl border border-white/15 cursor-pointer">
+          🌍 Select New Countries
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RUBLIX API KEY & AI ENGINE MODAL DRAWER -->
+  <div id="rublixModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="glass-panel rounded-3xl max-w-lg w-full p-6 border border-amber-400/30 relative">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2.5">
+          <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center text-slate-950 font-black text-lg shadow-lg">
+            R
+          </div>
+          <div>
+            <h2 class="text-lg font-extrabold tracking-tight text-white">API Key Rublix — AI Scouting Engine</h2>
+            <p class="text-xs text-slate-400">Stored securely in browser <code class="text-amber-300">localStorage</code> for real-time nation capability retrieval</p>
+          </div>
+        </div>
+        <button id="btnCloseRublix" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold">✕</button>
+      </div>
+
+      <div class="space-y-3.5 text-xs">
+        <div>
+          <label class="block font-bold text-slate-300 mb-1 uppercase tracking-wider">Rublix / OpenRouter / OpenAI API Key</label>
+          <div class="flex gap-2">
+            <input id="rublixKeyInput" type="password" placeholder="sk-or-v1-... or rublix-live-..." class="flex-1 bg-slate-900/90 border border-slate-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none" />
+            <button id="btnToggleKeyVis" class="px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold">Show</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-300 mb-1 uppercase tracking-wider">AI Endpoint URL</label>
+            <input id="rublixEndpointInput" type="text" value="https://openrouter.ai/api/v1/chat/completions" class="w-full bg-slate-900/90 border border-slate-700 focus:border-sky-400 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none" />
+          </div>
+          <div>
+            <label class="block font-bold text-slate-300 mb-1 uppercase tracking-wider">Scouting Model</label>
+            <input id="rublixModelInput" type="text" value="openrouter/auto" class="w-full bg-slate-900/90 border border-slate-700 focus:border-sky-400 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none" />
+          </div>
+        </div>
+
+        <div id="rublixStatusBox" class="rounded-xl bg-slate-900/80 border border-slate-800 p-3 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span id="rublixStatusLed" class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            <span id="rublixStatusText" class="text-slate-300 font-medium">Hybrid Heuristic + Rublix Live Engine Ready</span>
+          </div>
+          <span id="rublixSavedTag" class="text-[11px] font-bold text-amber-400">LOCALSTORAGE SYNCED</span>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-2">
+          <button id="btnClearRublix" class="px-3.5 py-2 rounded-xl bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-700/40 font-bold transition">
+            Clear Key
+          </button>
+          <div class="flex items-center gap-2">
+            <button id="btnTestRublix" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/30 font-bold transition">
+              Test & Scout Now
+            </button>
+            <button id="btnSaveRublix" class="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-extrabold shadow-lg transition">
+              Save to LocalStorage
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRE-MATCH WORLD CUP LOBBY & 211+ NATIONS SCOUTING MODAL -->
+  <div id="lobbyOverlay" class="fixed inset-0 z-40 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-2.5 sm:p-5 overflow-y-auto">
+    <div class="glass-panel rounded-3xl max-w-6xl w-full p-4 sm:p-6 border border-white/15 my-auto max-h-[94vh] flex flex-col">
+      <!-- Lobby Header -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/10">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[11px] font-extrabold uppercase tracking-wider">211 FIFA NATIONS • 4K WEBGL ENGINE</span>
+            <span id="lobbyAiModeBadge" class="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[11px] font-extrabold uppercase tracking-wider">RUBLIX AI READY</span>
+          </div>
+          <h1 class="font-broadcast text-2xl sm:text-4xl font-bold tracking-wide text-white mt-1">
+            WORLD CUP 4K — GLOBAL NATION SELECTOR & AI SCOUT
+          </h1>
+        </div>
+
+        <!-- Inline Quick Rublix API Key Input -->
+        <div class="flex flex-wrap items-center gap-2 bg-slate-900/90 p-2 rounded-2xl border border-amber-400/25">
+          <span class="text-xs font-bold text-amber-300 pl-1">🔑 API Key Rublix:</span>
+          <input id="quickRublixInput" type="password" placeholder="Paste API key (auto-saved)..." class="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-1.5 text-xs text-white w-44 sm:w-56 focus:outline-none" />
+          <button id="btnQuickSaveRublix" class="bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs px-3 py-1.5 rounded-xl transition">
+            Save
+          </button>
+        </div>
+      </div>
+
+      <!-- Main 3-Column Matchup & Nation Browser -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 py-4 overflow-y-auto flex-1">
+        <!-- HOME NATION CARD (4 cols) -->
+        <div class="lg:col-span-4 bg-slate-900/75 rounded-2xl p-4 border border-sky-400/25 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[11px] font-black uppercase tracking-widest text-sky-400">HOME NATION (YOU)</span>
+              <span id="homeConfedTag" class="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">CONMEBOL</span>
+            </div>
+            <div class="flex items-center gap-3 mb-3">
+              <div id="homeFlagBig" class="text-4xl sm:text-5xl">🇦🇷</div>
+              <div>
+                <h3 id="homeNameBig" class="font-broadcast text-2xl font-bold text-white leading-tight">Argentina</h3>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span id="homeFormationTag" class="text-xs font-bold text-emerald-300">4-3-3 Attack</span>
+                  <span class="text-slate-600">•</span>
+                  <span id="homeStyleTag" class="text-xs text-slate-300">Tiki-Taka & Verticality</span>
+                </div>
+              </div>
+              <div class="ml-auto text-right">
+                <div class="text-[10px] text-slate-400 uppercase font-bold">OVR</div>
+                <div id="homeOvrBig" class="font-broadcast text-3xl font-black text-amber-400">91</div>
+              </div>
+            </div>
+
+            <!-- 6 Real Capabilities Bars -->
+            <div id="homeStatsContainer" class="space-y-2 text-xs my-3"></div>
+
+            <!-- AI Scout Report -->
+            <div class="bg-slate-950/80 rounded-xl p-2.5 border border-white/5 text-[11px] text-slate-300 leading-relaxed">
+              <div class="font-bold text-amber-300 mb-0.5 flex items-center justify-between">
+                <span>🧠 Rublix AI Tactical Dossier</span>
+                <span id="homeScoutSource" class="text-[10px] text-slate-400">Verified Profile</span>
+              </div>
+              <p id="homeScoutNotes">Fluid short-passing triangles, relentless counter-pressing, and elite low-driven curling shots from the half-spaces.</p>
+            </div>
+          </div>
+
+          <button id="btnSelectTargetHome" class="mt-3 w-full py-2 rounded-xl bg-sky-500/20 border border-sky-400/50 text-sky-300 font-bold text-xs hover:bg-sky-500/30 transition">
+            ✓ Selecting Home Nation in Roster
+          </button>
+        </div>
+
+        <!-- CENTER: ALL 211+ COUNTRIES DIRECTORY (4 cols) -->
+        <div class="lg:col-span-4 bg-slate-900/75 rounded-2xl p-3.5 border border-white/10 flex flex-col max-h-[430px] lg:max-h-none">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <span class="text-xs font-extrabold uppercase tracking-wider text-slate-300">All World Nations (<span id="nationCountLabel">211</span>)</span>
+            <div class="flex rounded-lg bg-slate-950 p-0.5 text-[11px] font-bold">
+              <button id="assignHomeMode" class="px-2.5 py-1 rounded-md bg-sky-500 text-slate-950 transition">Set Home</button>
+              <button id="assignAwayMode" class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition">Set Away</button>
+            </div>
+          </div>
+
+          <!-- Search & Confederation Filter -->
+          <div class="flex gap-1.5 mb-2">
+            <input id="countrySearchInput" type="text" placeholder="Search 211 countries (Brazil, Japan, Morocco...)" class="flex-1 bg-slate-950 border border-slate-700 focus:border-sky-400 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none" />
+            <select id="confedFilter" class="bg-slate-950 border border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold text-slate-200 focus:outline-none">
+              <option value="ALL">ALL</option>
+              <option value="UEFA">UEFA</option>
+              <option value="CONMEBOL">CONMEBOL</option>
+              <option value="CONCACAF">CONCACAF</option>
+              <option value="CAF">CAF</option>
+              <option value="AFC">AFC</option>
+              <option value="OFC">OFC</option>
+            </select>
+          </div>
+
+          <!-- Scrollable Countries List -->
+          <div id="countriesList" class="flex-1 overflow-y-auto space-y-1 pr-1"></div>
+
+          <!-- Random Matchup & AI Scout Trigger -->
+          <div class="grid grid-cols-2 gap-2 mt-2.5 pt-2 border-t border-white/10">
+            <button id="btnRandomMatch" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition">
+              🎲 Random Derby
+            </button>
+            <button id="btnAiScoutBoth" class="py-2 rounded-xl bg-gradient-to-r from-amber-500/30 to-orange-500/30 hover:from-amber-500/40 hover:to-orange-500/40 border border-amber-400/50 text-amber-200 font-bold text-xs transition">
+              ⚡ AI Scout Capabilities
+            </button>
+          </div>
+        </div>
+
+        <!-- AWAY NATION CARD (4 cols) -->
+        <div class="lg:col-span-4 bg-slate-900/75 rounded-2xl p-4 border border-rose-400/25 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[11px] font-black uppercase tracking-widest text-rose-400">AWAY NATION (CPU AI)</span>
+              <span id="awayConfedTag" class="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">UEFA</span>
+            </div>
+            <div class="flex items-center gap-3 mb-3">
+              <div id="awayFlagBig" class="text-4xl sm:text-5xl">🇫🇷</div>
+              <div>
+                <h3 id="awayNameBig" class="font-broadcast text-2xl font-bold text-white leading-tight">France</h3>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span id="awayFormationTag" class="text-xs font-bold text-emerald-300">4-2-3-1 Transition</span>
+                  <span class="text-slate-600">•</span>
+                  <span id="awayStyleTag" class="text-xs text-slate-300">Explosive Counter</span>
+                </div>
+              </div>
+              <div class="ml-auto text-right">
+                <div class="text-[10px] text-slate-400 uppercase font-bold">OVR</div>
+                <div id="awayOvrBig" class="font-broadcast text-3xl font-black text-amber-400">91</div>
+              </div>
+            </div>
+
+            <!-- 6 Real Capabilities Bars -->
+            <div id="awayStatsContainer" class="space-y-2 text-xs my-3"></div>
+
+            <!-- AI Scout Report -->
+            <div class="bg-slate-950/80 rounded-xl p-2.5 border border-white/5 text-[11px] text-slate-300 leading-relaxed">
+              <div class="font-bold text-amber-300 mb-0.5 flex items-center justify-between">
+                <span>🧠 Rublix AI Tactical Dossier</span>
+                <span id="awayScoutSource" class="text-[10px] text-slate-400">Verified Profile</span>
+              </div>
+              <p id="awayScoutNotes">Blistering wing sprint transitions, athletic midfield ball-winning, and lethal direct vertical through-balls.</p>
+            </div>
+          </div>
+
+          <button id="btnSelectTargetAway" class="mt-3 w-full py-2 rounded-xl bg-rose-500/15 border border-rose-400/40 text-rose-300 font-bold text-xs hover:bg-rose-500/25 transition">
+            Click to Assign Away Nation
+          </button>
+        </div>
+      </div>
+
+      <!-- Footer Match Settings & Kickoff CTA -->
+      <div class="pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <div class="flex items-center gap-1.5 bg-slate-900 px-3 py-1.5 rounded-xl border border-white/10">
+            <span class="text-slate-400 font-semibold">Stadium Atmosphere:</span>
+            <select id="weatherSelect" class="bg-transparent font-bold text-sky-300 focus:outline-none cursor-pointer">
+              <option value="night" selected>4K Floodlit Night</option>
+              <option value="sunset">Golden Hour Sunset</option>
+              <option value="day">Crisp Afternoon Sun</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-1.5 bg-slate-900 px-3 py-1.5 rounded-xl border border-white/10">
+            <span class="text-slate-400 font-semibold">Match Format:</span>
+            <select id="formatSelect" class="bg-transparent font-bold text-emerald-300 focus:outline-none cursor-pointer">
+              <option value="11" selected>11v11 Full Pitch</option>
+              <option value="7">7v7 Fast Arcade</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-1.5 bg-slate-900 px-3 py-1.5 rounded-xl border border-white/10">
+            <span class="text-slate-400 font-semibold">AI Difficulty:</span>
+            <select id="difficultySelect" class="bg-transparent font-bold text-amber-300 focus:outline-none cursor-pointer">
+              <option value="0.82">Semi-Pro</option>
+              <option value="1.0" selected>World Class</option>
+              <option value="1.18">Legendary</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="btnKickoff" class="glow-emerald bg-gradient-to-r from-emerald-400 via-teal-400 to-sky-400 hover:from-emerald-300 hover:to-sky-300 text-slate-950 font-broadcast text-xl sm:text-2xl font-bold tracking-wider px-8 py-2.5 rounded-2xl shadow-2xl transition transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
+          ⚽ KICK OFF WORLD CUP MATCH
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM HUD: RADAR MINIMAP, SHOT POWER BAR & CONTROLS -->
+  <div id="bottomHud" class="fixed bottom-0 left-0 right-0 z-20 pointer-events-none p-3 sm:p-4 flex items-end justify-between">
+    <!-- Left: Touch Joystick (Mobile/Tablet) or Keyboard Legend (Desktop) -->
+    <div class="pointer-events-auto flex items-end gap-3">
+      <!-- Virtual Analog Stick for Touch / Mouse -->
+      <div id="virtualStickZone" class="w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-slate-950/55 border-2 border-white/20 backdrop-blur-md relative flex items-center justify-center touch-none">
+        <div class="w-10 h-10 rounded-full border border-white/15"></div>
+        <div id="virtualStickKnob" class="w-12 h-12 rounded-full bg-gradient-to-br from-sky-400 to-blue-600 border-2 border-white shadow-lg absolute pointer-events-none"></div>
+      </div>
+
+      <!-- Desktop Controls Legend -->
+      <div class="hidden xl:flex glass-panel rounded-2xl px-3.5 py-2.5 text-[11px] text-slate-300 gap-4">
+        <div><span class="px-1.5 py-0.5 rounded bg-slate-800 text-white font-bold">WASD / Arrows</span> Move</div>
+        <div><span class="px-1.5 py-0.5 rounded bg-slate-800 text-white font-bold">SHIFT</span> Sprint</div>
+        <div><span class="px-1.5 py-0.5 rounded bg-slate-800 text-white font-bold">X / E</span> Ground Pass</div>
+        <div><span class="px-1.5 py-0.5 rounded bg-slate-800 text-white font-bold">C</span> Through Ball</div>
+        <div><span class="px-1.5 py-0.5 rounded bg-slate-800 text-white font-bold">SPACE</span> Shoot / Slide</div>
+        <div><span class="px-1.5 py-0.5 rounded bg-slate-800 text-white font-bold">Q</span> Switch Player</div>
+      </div>
+    </div>
+
+    <!-- Center: Active Player Indicator + Shot Power Gauge + 2D Tactical Radar -->
+    <div class="flex flex-col items-center gap-2">
+      <!-- Shot Power Bar -->
+      <div id="powerBarWrapper" class="opacity-0 transition-opacity duration-150 bg-slate-950/85 border border-white/20 rounded-full p-1 w-44 sm:w-56 shadow-xl">
+        <div class="h-2.5 rounded-full bg-slate-800 overflow-hidden">
+          <div id="powerBarFill" class="h-full w-0 bg-gradient-to-r from-emerald-400 via-amber-400 to-rose-500 transition-all duration-75"></div>
+        </div>
+      </div>
+
+      <!-- Active Controlled Player Pill -->
+      <div class="glass-panel rounded-full px-3.5 py-1 flex items-center gap-2 text-xs font-bold">
+        <span id="activePlayerNum" class="w-5 h-5 rounded-full bg-sky-500 text-slate-950 flex items-center justify-center text-[11px] font-black">10</span>
+        <span id="activePlayerRole" class="text-white">FWD • Striker</span>
+        <div class="w-14 h-1.5 bg-slate-800 rounded-full overflow-hidden ml-1">
+          <div id="activeStaminaBar" class="h-full bg-emerald-400 w-full"></div>
+        </div>
+      </div>
+
+      <!-- 2D Tactical Radar Minimap -->
+      <canvas id="radarCanvas" width="190" height="122" class="hidden sm:block rounded-xl border border-white/20 bg-emerald-950/80 shadow-2xl"></canvas>
+    </div>
+
+    <!-- Right: Action Buttons (Touch + Clickable) -->
+    <div class="pointer-events-auto grid grid-cols-2 gap-2 sm:gap-2.5">
+      <button id="btnTouchSwitch" class="touch-btn w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex flex-col items-center justify-center text-white shadow-xl">
+        <span class="text-xs sm:text-sm font-black text-amber-300">SWITCH</span>
+        <span class="text-[10px] text-slate-300">[Q]</span>
+      </button>
+      <button id="btnTouchThrough" class="touch-btn w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex flex-col items-center justify-center text-white shadow-xl">
+        <span class="text-xs sm:text-sm font-black text-purple-300">THRU</span>
+        <span class="text-[10px] text-slate-300">[C]</span>
+      </button>
+      <button id="btnTouchPass" class="touch-btn w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex flex-col items-center justify-center text-white shadow-xl">
+        <span class="text-xs sm:text-sm font-black text-sky-300">PASS</span>
+        <span class="text-[10px] text-slate-300">[X]</span>
+      </button>
+      <button id="btnTouchShoot" class="touch-btn w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex flex-col items-center justify-center text-white shadow-xl border-rose-400/50">
+        <span class="text-xs sm:text-sm font-black text-rose-400">SHOOT</span>
+        <span class="text-[10px] text-slate-300">[SPACE]</span>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * ============================================================================
+     * 1. COMPLETE 211+ FIFA COUNTRIES DATABASE & REAL CAPABILITY SYNTHESIS ENGINE
+     * ============================================================================
+     */
+    const RAW_NATIONS_DATA = [
+      // Top Tier & Major World Cup Nations with bespoke tactical profiles
+      ["ARG","Argentina","CONMEBOL","🇦🇷","#75aadb","#ffffff",91,92,88,89,84,89,"4-3-3 Attack","Tiki-Taka & Verticality","Fluid short-passing triangles, relentless counter-pressing, and elite low-driven curling shots."],
+      ["FRA","France","UEFA","🇫🇷","#002395","#ed2939",92,90,89,94,91,87,"4-2-3-1 Transition","Explosive Counter","Blistering wing sprint transitions, athletic midfield ball-winning, and lethal vertical through-balls."],
+      ["ESP","Spain","UEFA","🇪🇸","#aa151b","#f1bf00",90,94,88,88,82,90,"4-3-3 Possession","La Roja Tiki-Taka","High defensive line, 70%+ positional dominance, rapid one-touch wall passes and wide overloads."],
+      ["BRA","Brazil","CONMEBOL","🇧🇷","#ffdf00","#009c3b",92,89,87,93,85,91,"4-2-3-1 Joga Bonito","Samba Flair & Pace","High-tempo wing dribbles, inverted fullbacks, and unpredictable curved long-range strikes."],
+      ["ENG","England","UEFA","🏴󠁧󠁢󠁥󠁮󠁧󠁿","#ffffff","#ce1124",90,90,87,90,87,90,"4-2-3-1 Control","Half-Space Overload","Patient buildup with incisive runners into the box, dangerous set-pieces and high pressing."],
+      ["GER","Germany","UEFA","🇩🇪","#ffffff","#000000",89,91,87,87,88,89,"4-2-3-1 Gegenpress","Vertical Gegenpress","Immediate 5-second counter-press upon turnover, disciplined compact shape, clinical box arrivals."],
+      ["POR","Portugal","UEFA","🇵🇹","#e42518","#006600",90,91,88,89,85,91,"4-3-3 Technical","Technical Rotations","Interchanging attacking midfielders, pinpoint diagonal switches, and lethal dead-ball delivery."],
+      ["NED","Netherlands","UEFA","🇳🇱","#f36c21","#ffffff",87,88,90,88,89,88,"3-4-2-1 Total Football","Total Football Press","Fluid positional rotations, towering center-backs, and rapid overlapping wing-back surges."],
+      ["ITA","Italy","UEFA","🇮🇹","#0066cc","#ffffff",86,89,90,86,86,87,"3-5-2 Catenaccio Modern","Tactical Regista","Compact mid-block, deep-lying playmaker orchestration, and razor-sharp defensive transitions."],
+      ["BEL","Belgium","UEFA","🇧🇪","#e30613","#000000",88,89,84,88,86,89,"4-3-3 Counter","Transition Precision","Rapid central vertical passes into space with clinical finishing on the break."],
+      ["CRO","Croatia","UEFA","🇭🇷","#ff0000","#ffffff",84,91,86,82,85,87,"4-3-3 Control","Midfield Mastery","Press-resistant midfield trio controlling tempo through metronomic passing and composure."],
+      ["URU","Uruguay","CONMEBOL","🇺🇾","#5bc2e7","#000000",88,87,87,89,92,86,"4-3-3 Bielsa Press","Garra Charrúa Press","Ferocious man-oriented high press, physical duels, and relentless box-to-box sprints."],
+      ["COL","Colombia","CONMEBOL","🇨🇴","#fcd116","#003893",87,87,85,89,87,88,"4-2-3-1 Dynamic","Cafetero Flair","Direct wing isolation, creative number-10 pockets, and high-energy pressing traps."],
+      ["MAR","Morocco","CAF","🇲🇦","#c1272d","#006233",85,86,88,89,87,85,"4-1-4-1 Compact","Atlas Counter-Block","Ultra-disciplined low-to-mid block with lightning-fast flank counters and overlapping fullbacks."],
+      ["JPN","Japan","AFC","🇯🇵","#002395","#ffffff",84,87,84,90,81,85,"4-2-3-1 Samurai Press","High-Tempo Agility","Relentless synchronized pressing triggers, technical combination play, and agile wingers."],
+      ["USA","United States","CONCACAF","🇺🇸","#ffffff","#002868",83,84,83,89,88,84,"4-3-3 Athletic","High-Octane Press","High physical stamina, aggressive counter-pressing, and direct vertical wing sprints."],
+      ["MEX","Mexico","CONCACAF","🇲🇽","#006847","#ffffff",83,84,82,86,83,84,"4-3-3 Wing Play","Aztec Combination","Quick short-passing triangles on the flanks and energetic high-line pressing."],
+      ["KOR","South Korea","AFC","🇰🇷","#cd2e3a","#000000",85,84,83,89,85,86,"4-2-3-1 Direct","Taeguk Transition","Tireless work-rate, rapid counter-attacks into space, and lethal long-range shooting."],
+      ["SEN","Senegal","CAF","🇸🇳","#00853f","#fdef42",85,84,86,90,91,84,"4-3-3 Power","Teranga Athletic","Dominant aerial and physical presence, rapid wide forwards, and compact defensive structure."],
+      ["SUI","Switzerland","UEFA","🇨🇭","#ff0000","#ffffff",83,85,86,83,86,85,"3-4-2-1 Organized","Alpine Structure","Tactically disciplined shape, structured build-up, and strong defensive organization."],
+      ["DEN","Denmark","UEFA","🇩🇰","#c60c30","#ffffff",83,86,85,84,86,86,"3-4-1-2 Dynamic","Nordic Collective","Cohesive pressing unit, smart midfield rotations, and dangerous set-piece routines."],
+      ["AUT","Austria","UEFA","🇦🇹","#ed2939","#ffffff",84,86,84,87,88,85,"4-2-3-1 Rangnick Press","Heavy Metal Press","Ultra-aggressive counter-pressing, verticality immediately upon winning possession."],
+      ["TUR","Turkey","UEFA","🇹🇷","#e30a17","#ffffff",85,85,82,86,84,86,"4-2-3-1 Passionate","Crescent Vertical","Creative young playmakers, energetic crowd-fueled pressing, and long-shot threat."],
+      ["NGA","Nigeria","CAF","🇳🇬","#008751","#ffffff",87,82,82,91,90,83,"3-4-3 Counter","Super Eagles Pace","Explosive attacking transitions, physical strikers, and rapid wing-back overlaps."],
+      ["EGY","Egypt","CAF","🇪🇬","#ce1126","#ffffff",86,82,83,88,84,85,"4-3-3 Transition","Pharaoh Counter","Compact defensive shell launching rapid diagonal balls to elite inverted wingers."],
+      ["CIV","Ivory Coast","CAF","🇨🇮","#f77f00","#009e60",84,85,84,88,89,84,"4-3-3 Physical","Elephants Power","Strong midfield ball carriers, physical dominance, and swift wide attacks."],
+      ["CAN","Canada","CONCACAF","🇨🇦","#ff0000","#ffffff",83,82,80,91,86,81,"4-4-2 Transition","North Star Sprint","Blistering transition speed down the left flank and direct vertical attacks."],
+      ["AUS","Australia","AFC","🇦🇺","#ffcd00","#00843d",80,81,82,84,88,83,"4-4-2 Direct","Socceroos Grit","High-intensity pressing, physical aerial battles, and structured defensive lines."],
+      ["IRN","Iran","AFC","🇮🇷","#239f40","#da0000",83,81,83,84,87,83,"4-4-2 Compact","Team Melli Block","Stingy defensive organization paired with clinical counter-attacking strikers."],
+      ["SAU","Saudi Arabia","AFC","🇸🇦","#006c35","#ffffff",80,82,80,85,80,81,"4-3-3 High Line","Green Falcons Press","Brave high offside trap, technical short passing, and agile midfield runners."],
+      ["SRB","Serbia","UEFA","🇷🇸","#c6363c","#0c4076",85,84,82,81,90,86,"3-4-1-2 Aerial","Balkan Powerhouse","Towering physical strikers, dangerous crosses, and strong set-piece presence."],
+      ["POL","Poland","UEFA","🇵🇱","#ffffff","#dc143c",85,82,82,83,86,85,"3-5-2 Direct","White Eagles Box","Direct service into clinical target strikers and compact mid-block defending."],
+      ["UKR","Ukraine","UEFA","🇺🇦","#0057b7","#ffd700",84,84,82,86,84,84,"4-3-3 Technical","Blue-Yellow Transition","Technical midfield progression and quick inverted wingers cutting inside."],
+      ["SWE","Sweden","UEFA","🇸🇪","#006aa7","#fecc02",84,83,83,85,87,84,"4-4-2 Organized","Scandinavian Direct","Disciplined two-bank block with explosive forward runners in transition."],
+      ["NOR","Norway","UEFA","🇳🇴","#ba0c2f","#00205b",87,85,81,88,89,85,"4-3-3 Vertical","Viking Power & Play","Elite through-ball vision feeding powerhouse strikers making runs behind the defense."],
+      ["SCO","Scotland","UEFA","🏴󠁧󠁢󠁳󠁣󠁴󠁿","#005eb8","#ffffff",80,83,82,82,87,82,"3-4-2-1 Grit","Tartan Engine","High-energy midfield runners, physical duels, and overlapping wing-backs."],
+      ["WAL","Wales","UEFA","🏴󠁧󠁢󠁷󠁬󠁳󠁿","#d30731","#00ab39",80,81,82,85,85,82,"3-4-3 Counter","Dragon Transition","Resilient back three and fast counter-attacks down the flanks."],
+      ["ECU","Ecuador","CONMEBOL","🇪🇨","#ffdd00","#034ea2",83,84,85,89,88,83,"4-2-3-1 High Press","La Tri Athletic","High-altitude stamina, aggressive pressing, and explosive wing-back runs."],
+      ["CHI","Chile","CONMEBOL","🇨🇱","#d52b1e","#0039a6",82,83,82,84,84,83,"4-3-3 Press","La Roja Intensity","Tenacious pressing, technical combination play, and quick vertical passes."],
+      ["PER","Peru","CONMEBOL","🇵🇪","#d91023","#ffffff",80,82,81,82,81,82,"4-2-3-1 Short Pass","Inca Rhythm","Patient ground passing rhythm and clever half-space combinations."],
+      ["ALG","Algeria","CAF","🇩🇿","#006233","#ffffff",84,84,81,86,83,85,"4-3-3 Technical","Fennec Flair","Technical wing play, creative midfield passing, and quick counter-attacks."],
+      ["CMR","Cameroon","CAF","🇨🇲","#007a5e","#ce1126",83,81,82,87,89,82,"4-3-3 Direct","Indomitable Power","Physical athleticism, direct wing service, and resilient defending."],
+      ["GHA","Ghana","CAF","🇬🇭","#ce1126","#fcd116",83,83,81,88,86,83,"4-2-3-1 Pace","Black Stars Flair","Agile dribbling, rapid transitions, and energetic midfield pressing."],
+      ["TUN","Tunisia","CAF","🇹🇳","#e70013","#ffffff",79,81,83,82,83,81,"3-4-3 Compact","Carthage Discipline","Tight defensive organization, disciplined shape, and swift counter-attacks."],
+      ["MLI","Mali","CAF","🇲🇱","#14b53a","#fcd116",81,83,81,87,88,81,"4-3-3 Athletic","Eagles Midfield","Dynamic box-to-box midfielders and rapid transition play."],
+      ["CRC","Costa Rica","CONCACAF","🇨🇷","#002b7f","#ce1126",78,79,81,81,82,80,"5-4-1 Low Block","Ticos Resilience","Deep compact five-man defense frustrating opponents and striking on set-pieces."],
+      ["PAN","Panama","CONCACAF","🇵🇦","#da121a","#072357",78,79,79,83,83,79,"3-4-3 Energetic","Canalero Press","Organized buildup from the back and energetic wide wing-backs."],
+      ["JAM","Jamaica","CONCACAF","🇯🇲","#009b3a","#fed100",82,78,78,90,86,80,"4-4-2 Speed","Reggae Boyz Pace","Blistering pace on both wings and direct counter-attacking football."],
+      ["QAT","Qatar","AFC","🇶🇦","#8a1538","#ffffff",79,79,78,82,79,80,"5-3-2 Counter","Maroon Cohesion","Long-term tactical cohesion, quick counter-attacks, and disciplined shape."],
+      ["IRQ","Iraq","AFC","🇮🇶","#007a3d","#ffffff",79,80,79,82,83,80,"4-2-3-1 Grit","Lions of Mesopotamia","Passionate pressing, physical midfield duels, and swift wing counters."],
+      ["UZB","Uzbekistan","AFC","🇺🇿","#0099b5","#1eb53a",80,80,80,84,82,80,"3-4-2-1 Technical","White Wolves","Technical young squad with crisp passing and disciplined defensive lines."],
+      ["NZL","New Zealand","OFC","🇳🇿","#000000","#ffffff",77,76,77,81,84,78,"4-3-3 Direct","All Whites Physical","Structured buildup, strong aerial presence, and direct wide service."],
+
+      // Remaining 159+ FIFA Member Nations across all 6 Confederations
+      ["ALB","Albania","UEFA","🇦🇱","#e41e20","#000000",78,79,80,81,82,79],["AND","Andorra","UEFA","🇦🇩","#10069f","#fedd00",64,65,68,67,70,66],
+      ["ARM","Armenia","UEFA","🇦🇲","#d90012","#0033a0",75,76,74,78,75,76],["AZE","Azerbaijan","UEFA","🇦🇿","#00b5e2","#ef3340",73,74,74,76,76,74],
+      ["BLR","Belarus","UEFA","🇧🇾","#ce1720","#007c30",73,74,75,75,77,74],["BIH","Bosnia & Herzegovina","UEFA","🇧🇦","#002395","#fecb00",80,79,78,79,83,80],
+      ["BUL","Bulgaria","UEFA","🇧🇬","#ffffff","#00966e",75,76,76,77,78,76],["CYP","Cyprus","UEFA","🇨🇾","#ffffff","#d57800",71,72,72,74,74,72],
+      ["CZE","Czechia","UEFA","🇨🇿","#d7141a","#11457e",82,83,82,83,86,83],["EST","Estonia","UEFA","🇪🇪","#0072ce","#000000",70,71,72,73,75,71],
+      ["FRO","Faroe Islands","UEFA","🇫🇴","#ffffff","#ed2939",68,69,71,70,74,70],["FIN","Finland","UEFA","🇫🇮","#ffffff","#003580",78,79,79,80,82,79],
+      ["GEO","Georgia","UEFA","🇬🇪","#ffffff","#ff0000",82,80,78,86,80,82],["GIB","Gibraltar","UEFA","🇬🇮","#ffffff","#da000c",62,63,65,66,67,63],
+      ["GRE","Greece","UEFA","🇬🇷","#0d5eaf","#ffffff",80,81,83,81,83,81],["HUN","Hungary","UEFA","🇭🇺","#ce2939","#477050",82,83,82,82,84,84],
+      ["ISL","Iceland","UEFA","🇮🇸","#02529c","#dc1e35",77,78,78,79,84,79],["IRL","Republic of Ireland","UEFA","🇮🇪","#169b62","#ffffff",78,79,80,81,84,79],
+      ["ISR","Israel","UEFA","🇮🇱","#ffffff","#0038b8",79,80,77,82,78,80],["KAZ","Kazakhstan","UEFA","🇰🇿","#00afca","#fec50c",74,75,76,77,79,75],
+      ["KOS","Kosovo","UEFA","🇽🇰","#244aa5","#d0a650",78,78,77,81,80,79],["LVA","Latvia","UEFA","🇱🇻","#9e3039","#ffffff",70,71,72,73,75,71],
+      ["LIE","Liechtenstein","UEFA","🇱🇮","#002b7f","#ce1126",63,64,66,66,68,65],["LTU","Lithuania","UEFA","🇱🇹","#fdb913","#006a44",70,71,72,73,75,71],
+      ["LUX","Luxembourg","UEFA","🇱🇺","#00a1de","#ed2939",75,77,76,78,77,77],["MLT","Malta","UEFA","🇲🇹","#ffffff","#cf142b",67,68,69,70,71,68],
+      ["MDA","Moldova","UEFA","🇲🇩","#0046ae","#ffd200",71,72,73,74,75,72],["MNE","Montenegro","UEFA","🇲🇪","#c40308","#d4af37",78,78,78,79,82,79],
+      ["MKD","North Macedonia","UEFA","🇲🇰","#d20000","#ffe600",77,79,77,80,79,78],["NIR","Northern Ireland","UEFA","🇬🇧","#006847","#ffffff",75,76,78,78,82,77],
+      ["ROU","Romania","UEFA","🇷🇴","#fcd116","#002b7f",80,81,80,83,81,81],["SMR","San Marino","UEFA","🇸🇲","#5eb6e4","#ffffff",58,59,62,62,63,60],
+      ["SVK","Slovakia","UEFA","🇸🇰","#ffffff","#0b4ea2",80,82,82,81,83,81],["SVN","Slovenia","UEFA","🇸🇮","#ffffff","#005ce6",81,81,82,82,84,81],
+
+      // CONMEBOL remaining
+      ["BOL","Bolivia","CONMEBOL","🇧🇴","#007934","#d52b1e",75,76,75,77,77,76],["PAR","Paraguay","CONMEBOL","🇵🇾","#d52b1e","#0038a8",79,79,81,81,84,79],
+      ["VEN","Venezuela","CONMEBOL","🇻🇪","#cf142b","#ffcc00",81,81,80,83,82,81],
+
+      // CONCACAF remaining
+      ["AIA","Anguilla","CONCACAF","🇦🇮","#012169","#ff9900",58,58,60,64,62,59],["ATG","Antigua & Barbuda","CONCACAF","🇦🇬","#ce1126","#0072c6",66,66,66,73,70,66],
+      ["ABW","Aruba","CONCACAF","🇦🇼","#4189dd","#ffd100",65,65,65,71,68,65],["BHS","Bahamas","CONCACAF","🇧🇸","#00778b","#ffc72c",61,61,62,69,66,62],
+      ["BRB","Barbados","CONCACAF","🇧🇧","#00267f","#ffc726",65,65,65,72,69,65],["BLZ","Belize","CONCACAF","🇧🇿","#003f87","#d90f19",64,64,65,70,68,64],
+      ["BMU","Bermuda","CONCACAF","🇧🇲","#cf142b","#ffffff",67,67,66,74,70,67],["VGB","British Virgin Islands","CONCACAF","🇻🇬","#00247d","#ffffff",59,59,60,65,63,60],
+      ["CYM","Cayman Islands","CONCACAF","🇰🇾","#00247d","#ce1126",60,60,61,66,64,61],["CUB","Cuba","CONCACAF","🇨🇺","#002a8f","#cf142b",71,70,70,76,74,71],
+      ["CUW","Curaçao","CONCACAF","🇨🇼","#002b7f","#f9e814",75,76,75,80,78,76],["DMA","Dominica","CONCACAF","🇩🇲","#006b3f","#fcd116",63,63,64,69,67,63],
+      ["DOM","Dominican Republic","CONCACAF","🇩🇴","#002d62","#ce1126",72,72,71,78,75,72],["SLV","El Salvador","CONCACAF","🇸🇻","#0f47af","#ffffff",72,73,72,76,74,73],
+      ["GRD","Grenada","CONCACAF","🇬🇩","#ce1126","#fcd116",67,66,66,74,71,67],["GTM","Guatemala","CONCACAF","🇬🇹","#4997d0","#ffffff",74,74,74,78,76,74],
+      ["GUY","Guyana","CONCACAF","🇬🇾","#009e49","#fcd116",68,68,67,75,72,68],["HTI","Haiti","CONCACAF","🇭🇹","#00209f","#d21034",75,74,73,82,78,74],
+      ["HND","Honduras","CONCACAF","🇭🇳","#0073cf","#ffffff",76,76,76,81,80,76],["MSR","Montserrat","CONCACAF","🇲🇸","#00247d","#009e49",64,64,64,71,68,64],
+      ["NIC","Nicaragua","CONCACAF","🇳🇮","#0067c6","#ffffff",71,71,71,75,73,71],["PRI","Puerto Rico","CONCACAF","🇵🇷","#ed0000","#0050f0",68,68,67,74,70,68],
+      ["KNA","St. Kitts & Nevis","CONCACAF","🇰🇳","#009e49","#ce1126",67,67,66,74,70,67],["LCA","St. Lucia","CONCACAF","🇱🇨","#6cf","#fcd116",66,66,66,73,69,66],
+      ["VCT","St. Vincent & Grenadines","CONCACAF","🇻🇨","#009e60","#fcd116",65,65,65,72,68,65],["SUR","Suriname","CONCACAF","🇸🇷","#377e3f","#b40a2d",74,74,74,79,78,74],
+      ["TTO","Trinidad & Tobago","CONCACAF","🇹🇹","#ce1126","#000000",73,73,72,79,77,73],["TCA","Turks & Caicos","CONCACAF","🇹🇨","#00247d","#fcd116",58,58,59,65,62,59],
+      ["VIR","US Virgin Islands","CONCACAF","🇻🇮","#ffffff","#fcd116",58,58,59,65,62,59],
+
+      // CAF remaining
+      ["AGO","Angola","CAF","🇦🇴","#cc092f","#000000",77,76,76,82,81,76],["BEN","Benin","CAF","🇧🇯","#008751","#fcd116",74,74,75,79,80,74],
+      ["BWA","Botswana","CAF","🇧🇼","#75aadb","#000000",70,70,71,75,74,70],["BFA","Burkina Faso","CAF","🇧🇫","#ef2b2d","#009e49",79,79,79,84,84,79],
+      ["BDI","Burundi","CAF","🇧🇮","#ce1126","#1eb53a",70,70,70,76,74,70],["CPV","Cape Verde","CAF","🇨🇻","#003893","#cf2027",78,78,77,82,79,78],
+      ["CAF","Central African Rep.","CAF","🇨🇫","#003082","#ffce00",71,71,70,77,77,71],["TCD","Chad","CAF","🇹🇩","#002664","#fecb00",66,66,67,73,72,66],
+      ["COM","Comoros","CAF","🇰🇲","#3d8e33","#ffc61e",73,73,73,77,75,73],["COG","Congo","CAF","🇨🇬","#009543","#fbde4a",73,73,73,78,79,73],
+      ["COD","DR Congo","CAF","🇨🇩","#007fff","#ce1021",80,79,79,85,85,79],["DJI","Djibouti","CAF","🇩🇯","#6ab2e7","#12ad2b",62,62,63,69,66,62],
+      ["GNQ","Equatorial Guinea","CAF","🇬🇶","#3e9a00","#e32118",76,76,76,80,79,76],["ERI","Eritrea","CAF","🇪🇷","#ea0437","#12ad2b",62,62,63,69,66,62],
+      ["SWZ","Eswatini","CAF","🇸🇿","#3e5eb9","#ffd900",67,67,68,72,71,67],["ETH","Ethiopia","CAF","🇪🇹","#078930","#fcdd09",69,70,69,75,71,69],
+      ["GAB","Gabon","CAF","🇬🇦","#009e60","#fcd116",78,77,76,83,81,78],["GMB","Gambia","CAF","🇬🇲","#ce1126","#0c1c8c",76,75,75,83,80,75],
+      ["GIN","Guinea","CAF","🇬🇳","#ce1126","#fcd116",79,79,78,84,83,79],["GNB","Guinea-Bissau","CAF","🇬🇼","#ce1126","#fcd116",74,73,73,80,79,73],
+      ["KEN","Kenya","CAF","🇰🇪","#006600","#bb0000",73,73,73,79,78,73],["LSO","Lesotho","CAF","🇱🇸","#00209f","#009543",66,66,67,71,70,66],
+      ["LBR","Liberia","CAF","🇱🇷","#bf0a30","#002868",69,69,69,76,74,69],["LBY","Libya","CAF","🇱🇾","#239e46","#000000",72,72,73,76,76,72],
+      ["MDG","Madagascar","CAF","🇲🇬","#fc3d32","#007e3a",72,72,72,77,74,72],["MWI","Malawi","CAF","🇲🇼","#ce1126","#339e35",70,70,70,75,74,70],
+      ["MRT","Mauritania","CAF","🇲🇷","#00a95c","#d01c1f",73,73,74,78,78,73],["MUS","Mauritius","CAF","🇲🇺","#ea2839","#1a206d",64,64,65,70,68,64],
+      ["MOZ","Mozambique","CAF","🇲🇿","#007168","#fce100",73,73,73,78,77,73],["NAM","Namibia","CAF","🇳🇦","#003580","#d21034",72,72,72,77,76,72],
+      ["NER","Niger","CAF","🇳🇪","#e05206","#0db02b",70,70,71,76,76,70],["RWA","Rwanda","CAF","🇷🇼","#00a1de","#fad201",69,69,70,75,73,69],
+      ["STP","São Tomé & Príncipe","CAF","🇸🇹","#12ad2b","#ffce00",63,63,64,70,68,63],["SYC","Seychelles","CAF","🇸🇨","#003d88","#d62828",60,60,61,67,64,60],
+      ["SLE","Sierra Leone","CAF","🇸🇱","#1eb53a","#0072c6",72,72,72,78,77,72],["SOM","Somalia","CAF","🇸🇴","#4189dd","#ffffff",60,60,61,67,64,60],
+      ["ZAF","South Africa","CAF","🇿🇦","#007749","#ffb81c",78,78,77,83,79,78],["SSD","South Sudan","CAF","🇸🇸","#078930","#da121a",66,66,66,73,73,66],
+      ["SDN","Sudan","CAF","🇸🇩","#d21034","#007229",70,70,71,75,75,70],["TZA","Tanzania","CAF","🇹🇿","#1eb53a","#00a3dd",72,72,72,77,76,72],
+      ["TGO","Togo","CAF","🇹🇬","#006a4e","#ffce00",73,73,73,78,78,73],["UGA","Uganda","CAF","🇺🇬","#fcdc04","#d90000",73,73,74,78,78,73],
+      ["ZMB","Zambia","CAF","🇿🇲","#198a00","#ef7d00",76,75,74,82,78,75],["ZWE","Zimbabwe","CAF","🇿🇼","#006400","#ffd200",73,73,73,79,77,73],
+
+      // AFC remaining
+      ["AFG","Afghanistan","AFC","🇦🇫","#000000","#d32011",67,67,67,72,70,67],["BHR","Bahrain","AFC","🇧🇭","#ce1126","#ffffff",75,75,75,78,77,75],
+      ["BGD","Bangladesh","AFC","🇧🇩","#006a4e","#f42a41",64,64,64,70,66,64],["BTN","Bhutan","AFC","🇧🇹","#ff4e12","#ffd520",62,62,63,68,65,62],
+      ["BRN","Brunei","AFC","🇧🇳","#f7e017","#000000",61,61,62,67,65,61],["KHM","Cambodia","AFC","🇰🇭","#032ea1","#e00025",65,65,65,71,67,65],
+      ["CHN","China PR","AFC","🇨🇳","#de2910","#ffde00",75,75,75,78,78,75],["TPE","Chinese Taipei","AFC","🇹🇼","#fe0000","#000095",66,66,66,71,68,66],
+      ["GUM","Guam","AFC","🇬🇺","#002868","#ce1126",60,60,61,66,64,60],["HKG","Hong Kong","AFC","🇭🇰","#de2910","#ffffff",69,69,69,73,71,69],
+      ["IND","India","AFC","🇮🇳","#ff9933","#138808",72,72,72,77,73,72],["IDN","Indonesia","AFC","🇮🇩","#ff0000","#ffffff",74,74,74,79,75,74],
+      ["JOR","Jordan","AFC","🇯🇴","#007a3d","#ce1126",78,77,77,82,80,78],["PRK","Korea DPR","AFC","🇰🇵","#024fa2","#ed1c27",73,73,74,77,78,73],
+      ["KWT","Kuwait","AFC","🇰🇼","#007a3d","#ce1126",71,71,71,74,73,71],["KGZ","Kyrgyzstan","AFC","🇰🇬","#e8112d","#ffef00",73,73,73,77,76,73],
+      ["LAO","Laos","AFC","🇱🇦","#ce1126","#002868",62,62,62,68,65,62],["LBN","Lebanon","AFC","🇱🇧","#ed1c24","#ffffff",72,72,73,75,75,72],
+      ["MAC","Macau","AFC","🇲🇴","#00785e","#ffffff",60,60,61,65,63,60],["MYS","Malaysia","AFC","🇲🇾","#cc0001","#010066",72,72,71,77,73,72],
+      ["MDV","Maldives","AFC","🇲🇻","#d21034","#007e3a",65,65,65,71,67,65],["MNG","Mongolia","AFC","🇲🇳","#c4272f","#015197",62,62,63,67,68,62],
+      ["MMR","Myanmar","AFC","🇲🇲","#fecb00","#34b233",65,65,65,71,67,65],["NPL","Nepal","AFC","🇳🇵","#dc143c","#003893",65,65,65,70,67,65],
+      ["OMN","Oman","AFC","🇴🇲","#db161b","#008000",76,76,76,79,78,76],["PAK","Pakistan","AFC","🇵🇰","#01411c","#ffffff",62,62,63,68,67,62],
+      ["PLE","Palestine","AFC","🇵🇸","#007a3d","#ce1126",74,74,74,78,77,74],["PHL","Philippines","AFC","🇵🇭","#0038a8","#ce1126",71,71,71,76,73,71],
+      ["SGP","Singapore","AFC","🇸🇬","#ef3340","#ffffff",68,68,68,73,70,68],["LKA","Sri Lanka","AFC","🇱🇰","#8d153a","#ffbe29",61,61,62,67,65,61],
+      ["SYR","Syria","AFC","🇸🇾","#ce1126","#ffffff",74,74,75,77,78,74],["TJK","Tajikistan","AFC","🇹🇯","#cc0000","#006600",74,74,74,78,77,74],
+      ["THA","Thailand","AFC","🇹🇭","#a51931","#2d2a4a",75,76,74,80,74,76],["TLS","Timor-Leste","AFC","🇹🇱","#dc241f","#ffc726",60,60,61,66,63,60],
+      ["TKM","Turkmenistan","AFC","🇹🇲","#00843d","#ffffff",69,69,70,73,73,69],["ARE","United Arab Emirates","AFC","🇦🇪","#ff0000","#00732f",77,77,76,81,77,77],
+      ["VNM","Vietnam","AFC","🇻🇳","#da251d","#ffff00",74,75,74,79,73,75],["YEM","Yemen","AFC","🇾🇪","#ce1126","#ffffff",67,67,68,72,70,67],
+
+      // OFC remaining
+      ["ASM","American Samoa","OFC","🇦🇸","#002868","#bf0a30",57,57,58,63,62,58],["COK","Cook Islands","OFC","🇨🇰","#00247d","#ffffff",59,59,60,65,64,59],
+      ["FJI","Fiji","OFC","🇫🇯","#68bfe5","#ffffff",67,67,67,73,72,67],["NCL","New Caledonia","OFC","🇳🇨","#0035ad","#ed4135",68,68,68,74,72,68],
+      ["PNG","Papua New Guinea","OFC","🇵🇬","#ce1126","#000000",66,66,66,73,71,66],["WSM","Samoa","OFC","🇼🇸","#ce1126","#002b7f",60,60,61,66,66,60],
+      ["SLB","Solomon Islands","OFC","🇸🇧","#0051ba","#215b33",68,68,67,75,71,68],["TAH","Tahiti","OFC","🇵🇫","#ce1126","#ffffff",67,67,67,73,71,67],
+      ["TON","Tonga","OFC","🇹🇴","#c10000","#ffffff",59,59,60,65,65,59],["VUT","Vanuatu","OFC","🇻🇺","#d21034","#009543",66,66,66,72,70,66]
+    ];
+
+    const NATIONS_DB = RAW_NATIONS_DATA.map(row => {
+      const [code, name, confed, flag, primary, secondary, atk, mid, def, pace, phys, tech, formation, style, notes] = row;
+      const ovr = Math.round((atk + mid + def + pace + phys + tech) / 6);
+      const defaultFormations = ["4-3-3 Balanced", "4-2-3-1 Compact", "4-4-2 Counter", "3-5-2 Wing-Backs"];
+      const resolvedFormation = formation || defaultFormations[ovr % defaultFormations.length];
+      const resolvedStyle = style || (pace > atk ? "Counter-Attacking Pace" : mid > def ? "Structured Possession" : "Disciplined Low-Block");
+      const resolvedNotes = notes || `${name} (${confed}) utilizes a ${resolvedFormation} setup emphasizing ${resolvedStyle.toLowerCase()}, compact defensive spacing, and quick vertical transitions.`;
+      return {
+        code, name, confed, flag, primary, secondary,
+        atk, mid, def, pace, phys, tech, ovr,
+        formation: resolvedFormation,
+        style: resolvedStyle,
+        notes: resolvedNotes,
+        scoutSource: formation ? "Verified FIFA Profile" : "Rublix Baseline Model"
+      };
+    });
+
+    /**
+     * ============================================================================
+     * 2. RUBLIX API KEY & LOCALSTORAGE SCOUTING ENGINE
+     * ============================================================================
+     */
+    const STORAGE_KEYS = {
+      API_KEY: "rublix_api_key_v1",
+      ENDPOINT: "rublix_api_endpoint_v1",
+      MODEL: "rublix_api_model_v1"
+    };
+
+    const RublixEngine = {
+      getKey() { return localStorage.getItem(STORAGE_KEYS.API_KEY) || ""; },
+      getEndpoint() { return localStorage.getItem(STORAGE_KEYS.ENDPOINT) || "https://openrouter.ai/api/v1/chat/completions"; },
+      getModel() { return localStorage.getItem(STORAGE_KEYS.MODEL) || "openrouter/auto"; },
+      save(key, endpoint, model) {
+        if (key !== null) localStorage.setItem(STORAGE_KEYS.API_KEY, key.trim());
+        if (endpoint) localStorage.setItem(STORAGE_KEYS.ENDPOINT, endpoint.trim());
+        if (model) localStorage.setItem(STORAGE_KEYS.MODEL, model.trim());
+        this.syncUI();
+      },
+      clear() {
+        localStorage.removeItem(STORAGE_KEYS.API_KEY);
+        this.syncUI();
+      },
+      syncUI() {
+        const key = this.getKey();
+        const hasKey = key.length > 4;
+        document.getElementById("rublixKeyInput").value = key;
+        document.getElementById("quickRublixInput").value = key;
+        document.getElementById("rublixEndpointInput").value = this.getEndpoint();
+        document.getElementById("rublixModelInput").value = this.getModel();
+
+        const dot = document.getElementById("rublixBadgeDot");
+        const badge = document.getElementById("lobbyAiModeBadge");
+        const statusLed = document.getElementById("rublixStatusLed");
+        const statusText = document.getElementById("rublixStatusText");
+
+        if (hasKey) {
+          dot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-ping";
+          badge.textContent = "RUBLIX LIVE AI ACTIVE";
+          badge.className = "px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[11px] font-extrabold uppercase tracking-wider";
+          statusLed.className = "w-2.5 h-2.5 rounded-full bg-emerald-400";
+          statusText.textContent = `Rublix API Key Active (${key.slice(0, 6)}••••) • Live LLM Scouting Enabled`;
+        } else {
+          dot.className = "w-2 h-2 rounded-full bg-amber-400";
+          badge.textContent = "HYBRID AI READY (ADD KEY)";
+          badge.className = "px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[11px] font-extrabold uppercase tracking-wider";
+          statusLed.className = "w-2.5 h-2.5 rounded-full bg-amber-400";
+          statusText.textContent = "Built-in Tactical Engine Active • Paste Rublix API key for live LLM scouting";
+        }
+      },
+
+      async scoutNation(nation) {
+        const apiKey = this.getKey();
+        if (!apiKey || apiKey.length < 6) {
+          // Deterministic enhanced tactical enrichment when offline/no key
+          nation.scoutSource = "Rublix Heuristic AI";
+          return nation;
+        }
+
+        const endpoint = this.getEndpoint();
+        const model = this.getModel();
+        const prompt = `Analyze the real-world men's national football (soccer) team of ${nation.name} (${nation.code}, ${nation.confed}). Return ONLY valid JSON with keys: atk (55-96), mid (55-96), def (55-96), pace (55-96), phys (55-96), tech (55-96), formation (e.g. "4-3-3 Press"), style (short 2-3 word tactical identity), notes (concise 1-sentence summary of their real-world football strengths and star archetypes).`;
+
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${apiKey}`,
+              "HTTP-Referer": window.location.origin || "https://worldcup4k.local",
+              "X-Title": "4K World Cup WebGL Rublix AI"
+            },
+            body: JSON.stringify({
+              model: model,
+              messages: [
+                { role: "system", content: "You are an elite FIFA tactical football analyst. Output strictly raw JSON only, no markdown fences." },
+                { role: "user", content: prompt }
+              ],
+              temperature: 0.3,
+              max_tokens: 220
+            })
+          });
+
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          const content = data.choices?.[0]?.message?.content || "";
+          const cleaned = content.replace(/```json|```/g, "").trim();
+          const parsed = JSON.parse(cleaned);
+
+          const clampStat = (v, fallback) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? Math.max(55, Math.min(97, Math.round(n))) : fallback;
+          };
+
+          nation.atk = clampStat(parsed.atk, nation.atk);
+          nation.mid = clampStat(parsed.mid, nation.mid);
+          nation.def = clampStat(parsed.def, nation.def);
+          nation.pace = clampStat(parsed.pace, nation.pace);
+          nation.phys = clampStat(parsed.phys, nation.phys);
+          nation.tech = clampStat(parsed.tech, nation.tech);
+          nation.ovr = Math.round((nation.atk + nation.mid + nation.def + nation.pace + nation.phys + nation.tech) / 6);
+          if (parsed.formation) nation.formation = String(parsed.formation).slice(0, 24);
+          if (parsed.style) nation.style = String(parsed.style).slice(0, 28);
+          if (parsed.notes) nation.notes = String(parsed.notes).slice(0, 220);
+          nation.scoutSource = "Rublix Live AI ⚡";
+        } catch (err) {
+          console.warn("Rublix AI fallback engaged:", err);
+          nation.scoutSource = "Rublix Smart Fallback";
+        }
+        return nation;
+      }
+    };
+
+    /**
+     * ============================================================================
+     * 3. WEB AUDIO API PROCEDURAL STADIUM & BALL SOUND SYNTHESIZER
+     * ============================================================================
+     */
+    const SoundEngine = {
+      ctx: null,
+      enabled: true,
+      crowdNode: null,
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
+      },
+      toggle() {
+        this.enabled = !this.enabled;
+        document.getElementById("btnAudio").textContent = this.enabled ? "🔊" : "🔇";
+        if (this.crowdNode) {
+          this.crowdNode.gain.value = this.enabled ? 0.035 : 0;
+        }
+      },
+      startAmbience() {
+        this.init();
+        if (!this.ctx || this.crowdNode) return;
+        const bufferSize = this.ctx.sampleRate * 2;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        let lastOut = 0;
+        for (let i = 0; i < bufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          data[i] = (lastOut + (0.02 * white)) / 1.02;
+          lastOut = data[i];
+          data[i] *= 2.5;
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        noise.loop = true;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.value = 340;
+        filter.Q.value = 0.7;
+
+        const gain = this.ctx.createGain();
+        gain.gain.value = this.enabled ? 0.035 : 0;
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start();
+        this.crowdNode = gain;
+      },
+      playKick(power = 0.7) {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(135 + power * 55, now);
+        osc.frequency.exponentialRampToValueAtTime(36, now + 0.13);
+        gain.gain.setValueAtTime(0.32 * Math.max(0.35, power), now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.15);
+      },
+      playWhistle(long = false) {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const dur = long ? 0.65 : 0.28;
+        const osc = this.ctx.createOscillator();
+        const lfo = this.ctx.createOscillator();
+        const lfoGain = this.ctx.createGain();
+        const gain = this.ctx.createGain();
+
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(2850, now);
+        lfo.frequency.setValueAtTime(38, now);
+        lfoGain.gain.setValueAtTime(95, now);
+
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.linearRampToValueAtTime(0.14, now + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        lfo.start(now);
+        osc.stop(now + dur + 0.02);
+        lfo.stop(now + dur + 0.02);
+      },
+      playPostPing() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(920, now);
+        osc.frequency.exponentialRampToValueAtTime(410, now + 0.35);
+        gain.gain.setValueAtTime(0.28, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.37);
+      },
+      playGoalRoar() {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        // Stadium horn + crowd swell
+        [220, 277.18, 329.63].forEach(freq => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = "sawtooth";
+          osc.frequency.setValueAtTime(freq, now);
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.linearRampToValueAtTime(0.06, now + 0.12);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 1.85);
+        });
+      }
+    };
+
+    /**
+     * ============================================================================
+     * 4. 4K HYPERREALISTIC WEBGL / THREE.JS STADIUM, PITCH & PLAYER ENGINE
+     * ============================================================================
+     */
+    const PITCH_W = 105; // FIFA 105m length (X axis: -52.5 to +52.5)
+    const PITCH_H = 68;  // FIFA 68m width (Z axis: -34 to +34)
+    const GOAL_W = 7.32;
+    const GOAL_H = 2.44;
+    const GOAL_D = 2.4;
+
+    const GameState = {
+      homeNation: NATIONS_DB[0], // Argentina
+      awayNation: NATIONS_DB[1], // France
+      assignMode: "HOME",
+      isPlaying: false,
+      isGoalCelebration: false,
+      isReplay: false,
+      isPeriodBreak: false,
+      matchEnded: false,
+      clockRunning: false,
+      setPieceState: null, // { type: 'THROW_IN'|'GOAL_KICK'|'CORNER_KICK'|'FREE_KICK', team: 'HOME'|'AWAY', spot: Vector3, timer: number, executor: Player }
+      weather: "night",
+      teamSize: 11,
+      aiDifficulty: 1.0,
+      cameraMode: 0, // 0: Tele Broadcast, 1: Pro Action Cam, 2: End-to-End, 3: Tactical Top
+      homeScore: 0,
+      awayScore: 0,
+      matchSeconds: 0,
+      half: 1,
+      lastTouchTeam: "HOME",
+      shotCharging: false,
+      shotCharge: 0,
+      replayBuffer: [],
+      replayIndex: 0
+    };
+
+    // Three.js Core Objects
+    let scene, camera, renderer, dirLight, hemiLight, ambientLight;
+    let pitchMesh, homeNetMesh, awayNetMesh, netDeformTimer = 0, netDeformSide = 0;
+    let crowdInstanced, floodlightCones = [];
+    let ballMesh, ballShadowMesh;
+    let refereeObj = null, linesmenObjs = [];
+    const ballState = {
+      pos: new THREE.Vector3(0, 0.22, 0),
+      vel: new THREE.Vector3(0, 0, 0),
+      spin: new THREE.Vector3(0, 0, 0),
+      radius: 0.22,
+      owner: null
+    };
+
+    let players = [];
+    let controlledPlayer = null;
+    const keys = {};
+    const joyVec = { x: 0, y: 0, active: false };
+
+    function createProceduralGrassTexture() {
+      const canvas = document.createElement("canvas");
+      canvas.width = 2048;
+      canvas.height = 1024;
+      const ctx = canvas.getContext("2d");
+
+      // Mowed alternating turf stripes
+      const stripes = 18;
+      const stripeW = canvas.width / stripes;
+      for (let i = 0; i < stripes; i++) {
+        ctx.fillStyle = i % 2 === 0 ? "#1b6b2f" : "#227d38";
+        ctx.fillRect(i * stripeW, 0, stripeW, canvas.height);
+      }
+
+      // Micro turf grain noise for 4K close-up sharpness
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const grain = (Math.random() - 0.5) * 18;
+        d[i] = Math.max(0, Math.min(255, d[i] + grain));
+        d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + grain * 1.2));
+        d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + grain * 0.7));
+      }
+      ctx.putImageData(imgData, 0, 0);
+
+      // Crisp FIFA White Chalk Lines
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+      ctx.lineWidth = 6;
+      const padX = 56;
+      const padY = 44;
+      const fieldW = canvas.width - padX * 2;
+      const fieldH = canvas.height - padY * 2;
+
+      // Outer touchlines & goal lines
+      ctx.strokeRect(padX, padY, fieldW, fieldH);
+
+      // Halfway line & center circle
+      const midX = canvas.width / 2;
+      const midY = canvas.height / 2;
+      ctx.beginPath();
+      ctx.moveTo(midX, padY);
+      ctx.lineTo(midX, padY + fieldH);
+      ctx.stroke();
+
+      const scaleX = fieldW / PITCH_W;
+      const scaleY = fieldH / PITCH_H;
+
+      ctx.beginPath();
+      ctx.arc(midX, midY, 9.15 * scaleX, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Center spot
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(midX, midY, 7, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Penalty Areas (16.5m deep, 40.32m wide) & Goal Areas (5.5m deep, 18.32m wide)
+      const penW = 16.5 * scaleX;
+      const penH = 40.32 * scaleY;
+      const sixW = 5.5 * scaleX;
+      const sixH = 18.32 * scaleY;
+
+      // Left penalty & 6-yard box
+      ctx.strokeRect(padX, midY - penH / 2, penW, penH);
+      ctx.strokeRect(padX, midY - sixH / 2, sixW, sixH);
+      ctx.beginPath();
+      ctx.arc(padX + 11 * scaleX, midY, 9.15 * scaleX, -0.92, 0.92);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(padX + 11 * scaleX, midY, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Right penalty & 6-yard box
+      ctx.strokeRect(padX + fieldW - penW, midY - penH / 2, penW, penH);
+      ctx.strokeRect(padX + fieldW - sixW, midY - sixH / 2, sixW, sixH);
+      ctx.beginPath();
+      ctx.arc(padX + fieldW - 11 * scaleX, midY, 9.15 * scaleX, Math.PI - 0.92, Math.PI + 0.92);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(padX + fieldW - 11 * scaleX, midY, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.anisotropy = 16;
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    function createSoccerBallTexture() {
+      const c = document.createElement("canvas");
+      c.width = 512;
+      c.height = 256;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(0, 0, 512, 256);
+
+      // Modern World Cup geometric panel pattern
+      ctx.fillStyle = "#0f172a";
+      for (let x = 32; x < 512; x += 64) {
+        for (let y = 32; y < 256; y += 64) {
+          ctx.beginPath();
+          for (let s = 0; s < 5; s++) {
+            const a = (s * 2 * Math.PI) / 5 - Math.PI / 2;
+            const px = x + Math.cos(a) * 16;
+            const py = y + Math.sin(a) * 16;
+            if (s === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.strokeStyle = "#f59e0b";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.anisotropy = 8;
+      return tex;
+    }
+
+    function createJerseyTexture(nation, number, isGK = false) {
+      const c = document.createElement("canvas");
+      c.width = 256;
+      c.height = 256;
+      const ctx = c.getContext("2d");
+
+      const pCol = isGK ? "#10b981" : nation.primary;
+      const sCol = isGK ? "#064e3b" : nation.secondary;
+
+      ctx.fillStyle = pCol;
+      ctx.fillRect(0, 0, 256, 256);
+
+      // Authentic national kit pattern variations (stripes, chest sash, hoops, trim)
+      const patternType = isGK ? 3 : (nation.code.charCodeAt(0) + nation.code.charCodeAt(1)) % 4;
+      ctx.fillStyle = sCol;
+      if (patternType === 0) {
+        // Classic vertical stripes (Argentina, Brazil trim, etc.)
+        for (let i = 16; i < 256; i += 44) {
+          ctx.fillRect(i, 0, 18, 256);
+        }
+      } else if (patternType === 1) {
+        // Diagonal chest sash (Peru, etc.)
+        ctx.save();
+        ctx.translate(128, 128);
+        ctx.rotate(-0.55);
+        ctx.fillRect(-180, -24, 360, 48);
+        ctx.restore();
+      } else if (patternType === 2) {
+        // Horizontal chest band + sleeve cuffs
+        ctx.fillRect(0, 68, 256, 42);
+        ctx.fillRect(0, 224, 256, 32);
+      } else {
+        // Collar & side panels
+        ctx.fillRect(0, 0, 26, 256);
+        ctx.fillRect(230, 0, 26, 256);
+        ctx.fillRect(0, 0, 256, 20);
+      }
+
+      // Subtle fabric weave shading
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      for (let y = 0; y < 256; y += 4) {
+        ctx.fillRect(0, y, 256, 1);
+      }
+
+      // Back squad number badge
+      ctx.fillStyle = "rgba(10, 15, 28, 0.78)";
+      ctx.beginPath();
+      ctx.arc(128, 134, 42, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "900 42px Oswald, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(number), 128, 136);
+
+      const tex = new THREE.CanvasTexture(c);
+      tex.anisotropy = 8;
+      return tex;
+    }
+
+    /**
+     * National & Regional Demographic Phenotype Generator
+     * Maps each of the 211 FIFA nations to authentic regional skin tones,
+     * hair colors, and hairstyles with natural squad diversity.
+     */
+    function getNationalPlayerAppearance(nation, squadIndex) {
+      const code = nation.code;
+      const confed = nation.confed;
+
+      const nordicCodes = new Set(["SWE","NOR","DEN","FIN","ISL","EST","LVA","LTU","FRO","IRL","SCO","WAL","ENG","NED","GER","AUT","SUI","POL","CZE","SVK","UKR","BLR","HUN","SVN","CRO","SRB","BIH","MNE","ROU","MDA","BEL","LUX"]);
+      const medCodes = new Set(["ESP","POR","ITA","GRE","TUR","ALB","MKD","CYP","MLT","GEO","ARM","AZE","ISR","ARG","URY","CHI"]);
+      const latinMixedCodes = new Set(["BRA","COL","VEN","ECU","PER","BOL","PAR","MEX","CRC","PAN","GTM","HND","SLV","NIC","CUB","DOM","PRI","CUW","SUR"]);
+      const caribbeanWestAfrCodes = new Set(["NGA","GHA","SEN","CIV","CMR","MLI","BFA","GIN","GNB","GMB","SLE","LBR","TGO","BEN","NER","CPV","JAM","TTO","HTI","BRB","BHS","GRD","LCA","VCT","KNA","ATG","DMA","GUY","BLZ","BER","AIA","TCA","VGB","VIR","CYM","MSR","ABW"]);
+      const eastCentralSouthAfrCodes = new Set(["KEN","UGA","TZA","ETH","ERI","SOM","DJI","RWA","BDI","COD","COG","GAB","GNQ","CAF","TCD","CMR","ZMB","ZWE","MWI","MOZ","AGO","NAM","BWA","ZAF","SWZ","LSO","MDG","MUS","SYC","COM","STP","SSD","SDN"]);
+      const menaCodes = new Set(["MAR","ALG","TUN","LBY","EGY","MRT","SAU","ARE","QAT","BHR","KWT","OMN","YEM","IRQ","IRN","JOR","LBN","SYR","PLE","AFG","PAK","UZB","KAZ","KGZ","TJK","TKM"]);
+      const eastAsianCodes = new Set(["JPN","KOR","PRK","CHN","TPE","HKG","MAC","MNG","VNM","THA","LAO","KHM","MMR","MYS","SGP","IDN","PHL","BRN","TLS"]);
+      const southAsianCodes = new Set(["IND","BGD","LKA","NPL","BTN","MDV"]);
+      const oceaniaCodes = new Set(["FJI","PNG","SLB","VUT","NCL","TAH","WSM","TON","COK","ASM","GUM"]);
+
+      let skinPalette = [0xe0ac69, 0xc68642, 0x8d5524, 0xf1c27d];
+      let hairPalette = [0x1a1412, 0x2c1e16, 0x0f0d0c];
+      let stylePool = ["fade", "short", "curls", "afro", "tied"];
+
+      if (nordicCodes.has(code)) {
+        skinPalette = [0xf7d7c4, 0xf1c27d, 0xe8b896, 0xd8a27c, 0x8d5524];
+        hairPalette = [0x3b2718, 0x6b4c30, 0xb88b4a, 0xd4af6a, 0x1c1715];
+        stylePool = ["short", "fade", "tied", "short", "curls"];
+      } else if (medCodes.has(code)) {
+        skinPalette = [0xe8b996, 0xd99e73, 0xc68642, 0xf1c27d, 0x8d5524];
+        hairPalette = [0x181311, 0x2b1d16, 0x3d291e, 0x110e0d];
+        stylePool = ["fade", "short", "curls", "tied"];
+      } else if (latinMixedCodes.has(code) || confed === "CONMEBOL") {
+        skinPalette = [0xd99b66, 0xb97a45, 0x8d5524, 0x5c3818, 0xe8b996];
+        hairPalette = [0x14100e, 0x241914, 0x0d0b0a, 0x3b281c];
+        stylePool = ["fade", "curls", "short", "tied", "afro"];
+      } else if (caribbeanWestAfrCodes.has(code) || eastCentralSouthAfrCodes.has(code)) {
+        skinPalette = [0x4a2c16, 0x3b2210, 0x5c3818, 0x6f4421, 0x2d190c];
+        hairPalette = [0x0d0b0a, 0x161210, 0x1f1916];
+        stylePool = ["fade", "afro", "curls", "short", "tied"];
+      } else if (menaCodes.has(code)) {
+        skinPalette = [0xd49a6a, 0xc18352, 0xe2b187, 0xa86c3e];
+        hairPalette = [0x120f0d, 0x1f1814, 0x2c2019];
+        stylePool = ["fade", "short", "curls"];
+      } else if (eastAsianCodes.has(code)) {
+        skinPalette = [0xecc49e, 0xe0b186, 0xd49e72, 0xf2cfa8];
+        hairPalette = [0x0e0d0d, 0x181514, 0x221c1a];
+        stylePool = ["short", "fade", "short", "tied"];
+      } else if (southAsianCodes.has(code)) {
+        skinPalette = [0x9e6338, 0x844e29, 0xb57749, 0x6d3f1f];
+        hairPalette = [0x0f0d0c, 0x1b1614];
+        stylePool = ["short", "fade", "curls"];
+      } else if (oceaniaCodes.has(code) || code === "NZL" || code === "AUS") {
+        skinPalette = [0x9c643b, 0x7e4c29, 0xe8b996, 0xb87c4f];
+        hairPalette = [0x120e0c, 0x241a14, 0x3d2b1f];
+        stylePool = ["tied", "curls", "afro", "fade", "short"];
+      } else if (code === "FRA" || code === "USA" || code === "CAN") {
+        skinPalette = [0x4a2c16, 0xf1c27d, 0x8d5524, 0xc68642, 0x3b2210];
+        hairPalette = [0x120e0c, 0x2c1e16, 0x0b0908, 0x7a5632];
+        stylePool = ["fade", "curls", "afro", "short", "tied"];
+      }
+
+      const skin = skinPalette[squadIndex % skinPalette.length];
+      const hairColor = hairPalette[(squadIndex * 3) % hairPalette.length];
+      const hairStyle = stylePool[(squadIndex * 5) % stylePool.length];
+      const hasBeard = (squadIndex % 3 === 1) && !eastAsianCodes.has(code);
+
+      return { skin, hairColor, hairStyle, hasBeard };
+    }
+
+      // Back squad number badge
+      ctx.fillStyle = "rgba(15, 23, 42, 0.72)";
+      ctx.beginPath();
+      ctx.arc(128, 128, 44, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "900 44px Oswald, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(number), 128, 130);
+
+      const tex = new THREE.CanvasTexture(c);
+      return tex;
+    }
+
+    function initThreeEngine() {
+      const canvas = document.getElementById("gameCanvas");
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2) * 1.25);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.15;
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color("#070d1a");
+      scene.fog = new THREE.FogExp2("#070d1a", 0.0032);
+
+      camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.5, 600);
+      camera.position.set(0, 34, 46);
+      camera.lookAt(0, 0, 0);
+
+      // Lighting Setup
+      hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x14532d, 0.65);
+      scene.add(hemiLight);
+
+      ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
+      scene.add(ambientLight);
+
+      dirLight = new THREE.DirectionalLight(0xfffbeb, 1.35);
+      dirLight.position.set(42, 68, 38);
+      dirLight.castShadow = true;
+      dirLight.shadow.mapSize.width = 2048;
+      dirLight.shadow.mapSize.height = 2048;
+      dirLight.shadow.camera.near = 10;
+      dirLight.shadow.camera.far = 190;
+      const d = 68;
+      dirLight.shadow.camera.left = -d;
+      dirLight.shadow.camera.right = d;
+      dirLight.shadow.camera.top = d;
+      dirLight.shadow.camera.bottom = -d;
+      dirLight.shadow.bias = -0.0005;
+      scene.add(dirLight);
+
+      buildStadiumAndPitch();
+      buildBall();
+      buildMatchOfficials();
+      spawnTeams();
+      applyAtmosphere(GameState.weather);
+
+      window.addEventListener("resize", onWindowResize);
+    }
+
+    function buildStadiumAndPitch() {
+      // Main 4K Mowed Turf Pitch (including runoff apron)
+      const grassTex = createProceduralGrassTexture();
+      const pitchGeo = new THREE.PlaneGeometry(PITCH_W + 12, PITCH_H + 10);
+      const pitchMat = new THREE.MeshStandardMaterial({
+        map: grassTex,
+        roughness: 0.82,
+        metalness: 0.04
+      });
+      pitchMesh = new THREE.Mesh(pitchGeo, pitchMat);
+      pitchMesh.rotation.x = -Math.PI / 2;
+      pitchMesh.receiveShadow = true;
+      scene.add(pitchMesh);
+
+      // Dark technical perimeter track
+      const apronGeo = new THREE.PlaneGeometry(160, 120);
+      const apronMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 });
+      const apron = new THREE.Mesh(apronGeo, apronMat);
+      apron.rotation.x = -Math.PI / 2;
+      apron.position.y = -0.04;
+      scene.add(apron);
+
+      // LED Perimeter Advertising Boards
+      const adMat = new THREE.MeshBasicMaterial({ color: 0x0284c7 });
+      const adAccentMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+      const northAd = new THREE.Mesh(new THREE.BoxGeometry(PITCH_W + 6, 1.05, 0.35), adMat);
+      northAd.position.set(0, 0.52, -PITCH_H / 2 - 3.2);
+      scene.add(northAd);
+
+      const southAd = new THREE.Mesh(new THREE.BoxGeometry(PITCH_W + 6, 1.05, 0.35), adAccentMat);
+      southAd.position.set(0, 0.52, PITCH_H / 2 + 3.2);
+      scene.add(southAd);
+
+      // 3D Goals + Billowing Nets
+      homeNetMesh = createGoalStructure(-PITCH_W / 2, 1);
+      awayNetMesh = createGoalStructure(PITCH_W / 2, -1);
+
+      // Corner Flags
+      const flagGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.5, 8);
+      const poleMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+      const clothMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, side: THREE.DoubleSide });
+      [
+        [-PITCH_W / 2, -PITCH_H / 2],
+        [-PITCH_W / 2, PITCH_H / 2],
+        [PITCH_W / 2, -PITCH_H / 2],
+        [PITCH_W / 2, PITCH_H / 2]
+      ].forEach(([cx, cz]) => {
+        const pole = new THREE.Mesh(flagGeo, poleMat);
+        pole.position.set(cx, 0.75, cz);
+        scene.add(pole);
+        const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.3), clothMat);
+        cloth.position.set(cx + 0.22, 1.32, cz);
+        scene.add(cloth);
+      });
+
+      // Tiered World Cup Stadium Bowl
+      const bowlMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.75 });
+      const roofMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.45, metalness: 0.4 });
+      const standConfigs = [
+        { w: 145, h: 18, d: 22, x: 0, y: 8.5, z: -52, rx: 0.38, ry: 0 },
+        { w: 145, h: 18, d: 22, x: 0, y: 8.5, z: 52, rx: -0.38, ry: 0 },
+        { w: 110, h: 18, d: 22, x: -72, y: 8.5, z: 0, rx: 0, ry: Math.PI / 2 },
+        { w: 110, h: 18, d: 22, x: 72, y: 8.5, z: 0, rx: 0, ry: -Math.PI / 2 }
+      ];
+      standConfigs.forEach(cfg => {
+        const stand = new THREE.Mesh(new THREE.BoxGeometry(cfg.w, cfg.h, cfg.d), bowlMat);
+        stand.position.set(cfg.x, cfg.y, cfg.z);
+        stand.rotation.set(cfg.rx, cfg.ry, 0);
+        scene.add(stand);
+
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(cfg.w + 4, 1.4, 14), roofMat);
+        roof.position.set(cfg.x * 0.94, cfg.y + 11.5, cfg.z * 0.94);
+        roof.rotation.y = cfg.ry;
+        scene.add(roof);
+      });
+
+      // Instanced Animated Stadium Crowd (2,400 spectators)
+      const crowdCount = 2400;
+      const specGeo = new THREE.BoxGeometry(0.55, 0.95, 0.45);
+      const specMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      crowdInstanced = new THREE.InstancedMesh(specGeo, specMat, crowdCount);
+      const dummy = new THREE.Object3D();
+      const color = new THREE.Color();
+      const palette = [0x38bdf8, 0xfacc15, 0xf43f5e, 0xffffff, 0x10b981, 0xf97316];
+
+      for (let i = 0; i < crowdCount; i++) {
+        const side = i % 4;
+        const row = Math.floor(Math.random() * 14);
+        const y = 2.2 + row * 1.05;
+        let x = 0, z = 0;
+        if (side === 0) { x = (Math.random() - 0.5) * 136; z = -43 - row * 1.15; }
+        else if (side === 1) { x = (Math.random() - 0.5) * 136; z = 43 + row * 1.15; }
+        else if (side === 2) { z = (Math.random() - 0.5) * 96; x = -63 - row * 1.15; }
+        else { z = (Math.random() - 0.5) * 96; x = 63 + row * 1.15; }
+
+        dummy.position.set(x, y, z);
+        dummy.updateMatrix();
+        crowdInstanced.setMatrixAt(i, dummy.matrix);
+        color.setHex(palette[i % palette.length]);
+        crowdInstanced.setColorAt(i, color);
+      }
+      crowdInstanced.instanceMatrix.needsUpdate = true;
+      if (crowdInstanced.instanceColor) crowdInstanced.instanceColor.needsUpdate = true;
+      scene.add(crowdInstanced);
+
+      // 4 Stadium Floodlight Towers + Volumetric Cones
+      const towerPositions = [
+        [-64, -46], [64, -46], [-64, 46], [64, 46]
+      ];
+      const towerMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.7 });
+      const lampMat = new THREE.MeshBasicMaterial({ color: 0xfef9c3 });
+      const coneMat = new THREE.MeshBasicMaterial({
+        color: 0xe0f2fe,
+        transparent: true,
+        opacity: 0.045,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+
+      towerPositions.forEach(([tx, tz]) => {
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.85, 34, 8), towerMat);
+        mast.position.set(tx, 17, tz);
+        scene.add(mast);
+
+        const bank = new THREE.Mesh(new THREE.BoxGeometry(5.5, 2.8, 1.2), lampMat);
+        bank.position.set(tx, 34, tz);
+        bank.lookAt(0, 0, 0);
+        scene.add(bank);
+
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(24, 68, 16, 1, true), coneMat);
+        cone.position.set(tx * 0.52, 17, tz * 0.52);
+        cone.lookAt(0, -12, 0);
+        cone.rotateX(Math.PI / 2);
+        scene.add(cone);
+        floodlightCones.push(cone);
+      });
+    }
+
+    function createGoalStructure(xPos, dirSign) {
+      const group = new THREE.Group();
+      const postMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25, metalness: 0.3 });
+      const postRadius = 0.08;
+
+      const leftPost = new THREE.Mesh(new THREE.CylinderGeometry(postRadius, postRadius, GOAL_H, 12), postMat);
+      leftPost.position.set(xPos, GOAL_H / 2, -GOAL_W / 2);
+      leftPost.castShadow = true;
+      group.add(leftPost);
+
+      const rightPost = new THREE.Mesh(new THREE.CylinderGeometry(postRadius, postRadius, GOAL_H, 12), postMat);
+      rightPost.position.set(xPos, GOAL_H / 2, GOAL_W / 2);
+      rightPost.castShadow = true;
+      group.add(rightPost);
+
+      const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(postRadius, postRadius, GOAL_W + postRadius * 2, 12), postMat);
+      crossbar.rotation.x = Math.PI / 2;
+      crossbar.position.set(xPos, GOAL_H, 0);
+      crossbar.castShadow = true;
+      group.add(crossbar);
+
+      // Billowing Net Mesh
+      const netGeo = new THREE.BoxGeometry(GOAL_D, GOAL_H, GOAL_W, 6, 6, 10);
+      const netMat = new THREE.MeshBasicMaterial({
+        color: 0xe2e8f0,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.42
+      });
+      const netMesh = new THREE.Mesh(netGeo, netMat);
+      netMesh.position.set(xPos - dirSign * (GOAL_D / 2), GOAL_H / 2, 0);
+      group.add(netMesh);
+
+      scene.add(group);
+      return netMesh;
+    }
+
+    function buildBall() {
+      const ballGeo = new THREE.SphereGeometry(ballState.radius, 24, 24);
+      const ballMat = new THREE.MeshStandardMaterial({
+        map: createSoccerBallTexture(),
+        roughness: 0.35,
+        metalness: 0.08
+      });
+      ballMesh = new THREE.Mesh(ballGeo, ballMat);
+      ballMesh.castShadow = true;
+      ballMesh.position.copy(ballState.pos);
+      scene.add(ballMesh);
+
+      // Ground contact shadow ring for crisp depth perception
+      const shGeo = new THREE.CircleGeometry(0.32, 16);
+      const shMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.42 });
+      ballShadowMesh = new THREE.Mesh(shGeo, shMat);
+      ballShadowMesh.rotation.x = -Math.PI / 2;
+      ballShadowMesh.position.y = 0.02;
+      scene.add(ballShadowMesh);
+    }
+
+    function applyAtmosphere(mode) {
+      GameState.weather = mode;
+      if (mode === "night") {
+        scene.background = new THREE.Color("#060b16");
+        scene.fog = new THREE.FogExp2("#060b16", 0.0032);
+        dirLight.color.setHex(0xf8fafc);
+        dirLight.intensity = 1.38;
+        hemiLight.intensity = 0.65;
+        floodlightCones.forEach(c => c.visible = true);
+      } else if (mode === "sunset") {
+        scene.background = new THREE.Color("#3b1d36");
+        scene.fog = new THREE.FogExp2("#3b1d36", 0.003);
+        dirLight.color.setHex(0xfb923c);
+        dirLight.intensity = 1.55;
+        hemiLight.intensity = 0.72;
+        floodlightCones.forEach(c => c.visible = true);
+      } else {
+        scene.background = new THREE.Color("#38bdf8");
+        scene.fog = new THREE.FogExp2("#7dd3fc", 0.0022);
+        dirLight.color.setHex(0xffffff);
+        dirLight.intensity = 1.65;
+        hemiLight.intensity = 0.92;
+        floodlightCones.forEach(c => c.visible = false);
+      }
+    }
+
+    /**
+     * ============================================================================
+     * 5. ANATOMICALLY REALISTIC 3D PLAYERS & MATCH OFFICIALS (REFEREE + LINESMEN)
+     * ============================================================================
+     */
+    function createAnatomicalHumanFigure({
+      jerseyMat,
+      shortsColor,
+      sockColor,
+      bootColor,
+      skinColor,
+      hairColor,
+      hairStyle = "short",
+      hasBeard = false,
+      scale = 1.0,
+      isReferee = false,
+      isLinesman = false
+    }) {
+      const group = new THREE.Group();
+
+      const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.52, metalness: 0.04 });
+      const shortsMat = new THREE.MeshStandardMaterial({ color: shortsColor, roughness: 0.65 });
+      const sockMat = new THREE.MeshStandardMaterial({ color: sockColor, roughness: 0.68 });
+      const bootMat = new THREE.MeshStandardMaterial({ color: bootColor, roughness: 0.28, metalness: 0.25 });
+      const hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.78 });
+
+      // Sculpted Upper Torso (wider shoulders tapering to waist)
+      const chestGeo = new THREE.CylinderGeometry(0.24, 0.19, 0.56, 14);
+      chestGeo.scale(1.18, 1, 0.76);
+      const torso = new THREE.Mesh(chestGeo, jerseyMat);
+      torso.position.y = 1.18;
+      torso.castShadow = true;
+      group.add(torso);
+
+      // Shoulders
+      const shoulderGeo = new THREE.SphereGeometry(0.11, 10, 10);
+      const lShoulder = new THREE.Mesh(shoulderGeo, jerseyMat);
+      lShoulder.position.set(-0.27, 1.40, 0);
+      group.add(lShoulder);
+
+      const rShoulder = new THREE.Mesh(shoulderGeo, jerseyMat);
+      rShoulder.position.set(0.27, 1.40, 0);
+      group.add(rShoulder);
+
+      // Neck
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.078, 0.14, 10), skinMat);
+      neck.position.y = 1.50;
+      group.add(neck);
+
+      // Anatomically Sculpted Head + Jaw + Nose + Ears + Hair
+      const headGroup = new THREE.Group();
+      headGroup.position.y = 1.68;
+
+      const cranium = new THREE.Mesh(new THREE.SphereGeometry(0.145, 16, 16), skinMat);
+      cranium.scale.set(0.92, 1.08, 1.0);
+      cranium.castShadow = true;
+      headGroup.add(cranium);
+
+      const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.115, 12, 12), skinMat);
+      jaw.position.set(0, -0.055, 0.025);
+      jaw.scale.set(0.86, 0.85, 0.92);
+      headGroup.add(jaw);
+
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.024, 0.055, 8), skinMat);
+      nose.rotation.x = Math.PI / 2.2;
+      nose.position.set(0, -0.01, 0.145);
+      headGroup.add(nose);
+
+      // Eyes
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111827 });
+      const lEye = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 8), eyeMat);
+      lEye.position.set(-0.048, 0.02, 0.132);
+      const rEye = lEye.clone();
+      rEye.position.x = 0.048;
+      headGroup.add(lEye, rEye);
+
+      if (hasBeard) {
+        const beard = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10), hairMat);
+        beard.position.set(0, -0.062, 0.032);
+        beard.scale.set(0.9, 0.82, 0.95);
+        headGroup.add(beard);
+      }
+
+      // Authentic Hairstyles
+      if (hairStyle === "afro") {
+        const afro = new THREE.Mesh(new THREE.SphereGeometry(0.175, 14, 14), hairMat);
+        afro.position.set(0, 0.045, -0.02);
+        headGroup.add(afro);
+      } else if (hairStyle === "curls") {
+        for (let i = 0; i < 9; i++) {
+          const ang = (i / 9) * Math.PI * 2;
+          const puff = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 8), hairMat);
+          puff.position.set(Math.cos(ang) * 0.11, 0.09 + (i % 2) * 0.02, Math.sin(ang) * 0.11 - 0.01);
+          headGroup.add(puff);
+        }
+      } else if (hairStyle === "tied") {
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 12, 0, Math.PI * 2, 0, Math.PI * 0.58), hairMat);
+        cap.position.y = 0.015;
+        const bun = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 10), hairMat);
+        bun.position.set(0, 0.03, -0.165);
+        headGroup.add(cap, bun);
+      } else if (hairStyle === "fade") {
+        const topHair = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.145, 0.07, 14), hairMat);
+        topHair.position.set(0, 0.125, -0.005);
+        headGroup.add(topHair);
+      } else {
+        const shortCap = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 12, 0, Math.PI * 2, 0, Math.PI * 0.6), hairMat);
+        shortCap.position.set(0, 0.015, -0.01);
+        headGroup.add(shortCap);
+      }
+
+      group.add(headGroup);
+
+      // Pelvis & Athletic Shorts
+      const pelvis = new THREE.Mesh(new THREE.CylinderGeometry(0.195, 0.21, 0.24, 14), shortsMat);
+      pelvis.scale.set(1.16, 1, 0.78);
+      pelvis.position.y = 0.80;
+      pelvis.castShadow = true;
+      group.add(pelvis);
+
+      // Articulated Left & Right Legs (Shorts leg + Knee + Calf Sock + Studded Boot)
+      const buildLeg = (sideSign) => {
+        const legPivot = new THREE.Group();
+        legPivot.position.set(sideSign * 0.125, 0.72, 0);
+
+        const thighShort = new THREE.Mesh(new THREE.CylinderGeometry(0.098, 0.086, 0.24, 12), shortsMat);
+        thighShort.position.y = -0.10;
+        thighShort.castShadow = true;
+        legPivot.add(thighShort);
+
+        const knee = new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.072, 0.10, 10), skinMat);
+        knee.position.y = -0.25;
+        legPivot.add(knee);
+
+        const sockCalf = new THREE.Mesh(new THREE.CylinderGeometry(0.074, 0.056, 0.32, 12), sockMat);
+        sockCalf.position.y = -0.45;
+        sockCalf.castShadow = true;
+        legPivot.add(sockCalf);
+
+        const boot = new THREE.Mesh(new THREE.BoxGeometry(0.115, 0.085, 0.24), bootMat);
+        boot.position.set(0, -0.64, 0.045);
+        boot.castShadow = true;
+        legPivot.add(boot);
+
+        return legPivot;
+      };
+
+      const leftLeg = buildLeg(-1);
+      const rightLeg = buildLeg(1);
+      group.add(leftLeg, rightLeg);
+
+      // Articulated Left & Right Arms (Sleeve + Forearm + Hand)
+      const buildArm = (sideSign) => {
+        const armPivot = new THREE.Group();
+        armPivot.position.set(sideSign * 0.30, 1.38, 0);
+
+        const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.068, 0.20, 10), jerseyMat);
+        sleeve.position.y = -0.09;
+        sleeve.castShadow = true;
+        armPivot.add(sleeve);
+
+        const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.064, 0.050, 0.28, 10), skinMat);
+        forearm.position.y = -0.31;
+        forearm.castShadow = true;
+        armPivot.add(forearm);
+
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 8), skinMat);
+        hand.position.y = -0.46;
+        armPivot.add(hand);
+
+        // Linesman Checkered Flag
+        if (isLinesman && sideSign === 1) {
+          const stick = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.012, 0.012, 0.55, 8),
+            new THREE.MeshStandardMaterial({ color: 0xe2e8f0 })
+          );
+          stick.position.set(0, -0.48, 0.22);
+          stick.rotation.x = Math.PI / 2.2;
+          const flagCloth = new THREE.Mesh(
+            new THREE.BoxGeometry(0.02, 0.24, 0.28),
+            new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0x854d0e, emissiveIntensity: 0.25 })
+          );
+          flagCloth.position.set(0, -0.48, 0.44);
+          armPivot.add(stick, flagCloth);
+        }
+
+        // Referee Yellow/Red Card in raised right hand
+        if (isReferee && sideSign === 1) {
+          const cardMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.085, 0.12, 0.012),
+            new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xca8a04, emissiveIntensity: 0.3 })
+          );
+          cardMesh.position.set(0, -0.50, 0.04);
+          cardMesh.visible = false;
+          armPivot.add(cardMesh);
+          group.userData.refCard = cardMesh;
+        }
+
+        return armPivot;
+      };
+
+      const leftArm = buildArm(-1);
+      const rightArm = buildArm(1);
+      group.add(leftArm, rightArm);
+
+      group.scale.setScalar(scale);
+      return { group, leftLeg, rightLeg, leftArm, rightArm, torso };
+    }
+
+    function buildMatchOfficials() {
+      // Main FIFA Referee ("Judge") in official neon-yellow & black kit
+      const refJersey = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.45 });
+      const refFig = createAnatomicalHumanFigure({
+        jerseyMat: refJersey,
+        shortsColor: "#0f172a",
+        sockColor: "#0f172a",
+        bootColor: "#111827",
+        skinColor: 0xd99e73,
+        hairColor: 0x1e1b18,
+        hairStyle: "fade",
+        hasBeard: true,
+        scale: 1.03,
+        isReferee: true
+      });
+      refFig.group.position.set(0, 0, -14);
+      scene.add(refFig.group);
+
+      refereeObj = {
+        ...refFig,
+        vel: new THREE.Vector3(0, 0, 0),
+        animPhase: 0,
+        gestureTimer: 0,
+        gestureType: null // 'WHISTLE' | 'CARD' | 'POINT_LEFT' | 'POINT_RIGHT'
+      };
+
+      // Two Touchline Assistant Referees (Linesmen) with Flags
+      linesmenObjs.forEach(l => scene.remove(l.group));
+      linesmenObjs = [];
+
+      [-1, 1].forEach((sideSign, idx) => {
+        const lmJersey = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.48 });
+        const lmFig = createAnatomicalHumanFigure({
+          jerseyMat: lmJersey,
+          shortsColor: "#0f172a",
+          sockColor: "#0f172a",
+          bootColor: "#111827",
+          skinColor: idx === 0 ? 0xe8b996 : 0x5c3818,
+          hairColor: 0x14100e,
+          hairStyle: idx === 0 ? "short" : "fade",
+          scale: 1.0,
+          isLinesman: true
+        });
+        lmFig.group.position.set(sideSign * 18, 0, sideSign * (PITCH_H / 2 + 1.35));
+        lmFig.group.rotation.y = sideSign === 1 ? Math.PI : 0;
+        scene.add(lmFig.group);
+
+        linesmenObjs.push({
+          ...lmFig,
+          sideSign,
+          flagRaiseTimer: 0,
+          animPhase: 0
+        });
+      });
+    }
+
+    function createArticulatedPlayer(team, nation, num, role, homeX, homeZ) {
+      const isGK = role === "GK";
+      const appearance = getNationalPlayerAppearance(nation, num);
+      const jerseyMat = new THREE.MeshStandardMaterial({
+        map: createJerseyTexture(nation, num, isGK),
+        roughness: 0.48,
+        metalness: 0.05
+      });
+
+      const bootColors = [0xf59e0b, 0x38bdf8, 0xf43f5e, 0xffffff, 0x10b981];
+      const heightScale = isGK ? 1.07 : (role === "CB" || role === "ST" ? 1.04 : 0.99 + (num % 3) * 0.015);
+
+      const fig = createAnatomicalHumanFigure({
+        jerseyMat,
+        shortsColor: isGK ? "#064e3b" : nation.secondary,
+        sockColor: isGK ? "#10b981" : nation.primary,
+        bootColor: bootColors[num % bootColors.length],
+        skinColor: appearance.skin,
+        hairColor: appearance.hairColor,
+        hairStyle: appearance.hairStyle,
+        hasBeard: appearance.hasBeard,
+        scale: heightScale
+      });
+
+      // Active Selection Cursor Ring under boots
+      const ringGeo = new THREE.RingGeometry(0.55, 0.76, 28);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: team === "HOME" ? 0x38bdf8 : 0xf43f5e,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.0
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.03;
+      fig.group.add(ring);
+
+      fig.group.position.set(homeX, 0, homeZ);
+      scene.add(fig.group);
+
+      return {
+        team,
+        nation,
+        num,
+        role,
+        isGK,
+        mesh: fig.group,
+        leftLeg: fig.leftLeg,
+        rightLeg: fig.rightLeg,
+        leftArm: fig.leftArm,
+        rightArm: fig.rightArm,
+        torso: fig.torso,
+        ring,
+        homePos: new THREE.Vector3(homeX, 0, homeZ),
+        vel: new THREE.Vector3(0, 0, 0),
+        stamina: 100,
+        kickCooldown: 0,
+        tackleCooldown: 0,
+        animPhase: Math.random() * Math.PI * 2
+      };
+    }
+
+    function getFormationCoordinates(count) {
+      if (count === 7) {
+        return [
+          { num: 1, role: "GK", x: -49.5, z: 0 },
+          { num: 4, role: "DEF", x: -32, z: -14 },
+          { num: 5, role: "DEF", x: -32, z: 14 },
+          { num: 8, role: "MID", x: -16, z: -10 },
+          { num: 6, role: "MID", x: -16, z: 10 },
+          { num: 10, role: "FWD", x: -4, z: -8 },
+          { num: 9, role: "FWD", x: -2, z: 8 }
+        ];
+      }
+      // Full 11v11 FIFA Tactical Coordinates
+      return [
+        { num: 1, role: "GK", x: -50.2, z: 0 },
+        { num: 2, role: "RB", x: -35, z: 22 },
+        { num: 4, role: "CB", x: -38, z: 8 },
+        { num: 5, role: "CB", x: -38, z: -8 },
+        { num: 3, role: "LB", x: -35, z: -22 },
+        { num: 6, role: "CDM", x: -24, z: 0 },
+        { num: 8, role: "CM", x: -16, z: 13 },
+        { num: 10, role: "CAM", x: -14, z: -13 },
+        { num: 7, role: "RW", x: -4, z: 23 },
+        { num: 11, role: "LW", x: -4, z: -23 },
+        { num: 9, role: "ST", x: -1.5, z: 0 }
+      ];
+    }
+
+    function spawnTeams() {
+      players.forEach(p => scene.remove(p.mesh));
+      players = [];
+
+      const coords = getFormationCoordinates(GameState.teamSize);
+
+      // Home Team (Attacks Left -> Right)
+      coords.forEach(c => {
+        players.push(createArticulatedPlayer("HOME", GameState.homeNation, c.num, c.role, c.x, c.z));
+      });
+
+      // Away Team (Attacks Right -> Left)
+      coords.forEach(c => {
+        players.push(createArticulatedPlayer("AWAY", GameState.awayNation, c.num, c.role, -c.x, -c.z));
+      });
+
+      // Default controlled player: Home #9 or #10
+      controlledPlayer = players.find(p => p.team === "HOME" && p.num === 9) || players[1];
+      resetKickoffPositions("HOME");
+    }
+
+    function resetKickoffPositions(kickoffTeam = "HOME") {
+      ballState.pos.set(0, ballState.radius, 0);
+      ballState.vel.set(0, 0, 0);
+      ballState.spin.set(0, 0, 0);
+      ballState.owner = null;
+
+      players.forEach(p => {
+        p.mesh.position.copy(p.homePos);
+        p.vel.set(0, 0, 0);
+        p.mesh.rotation.y = p.team === "HOME" ? Math.PI / 2 : -Math.PI / 2;
+      });
+
+      // Place kickoff taker on center spot
+      const taker = players.find(p => p.team === kickoffTeam && p.num === 9);
+      if (taker) {
+        taker.mesh.position.set(kickoffTeam === "HOME" ? -0.8 : 0.8, 0, 0);
+        if (kickoffTeam === "HOME") controlledPlayer = taker;
+      }
+    }
+
+    /**
+     * ============================================================================
+     * 6. REAL CAPABILITY TRANSLATION, BALL SPIN PHYSICS & TACTICAL AI
+     * ============================================================================
+     */
+    function getEffectivePlayerSpeed(player) {
+      const paceFactor = 0.82 + (player.nation.pace / 100) * 0.36;
+      const diffFactor = player.team === "AWAY" ? GameState.aiDifficulty : 1.0;
+      return 8.6 * paceFactor * diffFactor;
+    }
+
+    function kickBall(kicker, dirVec, power, loft = 0.14, curveSpin = 0) {
+      const techBonus = 0.85 + (kicker.nation.tech / 100) * 0.3;
+      const atkBonus = 0.85 + (kicker.nation.atk / 100) * 0.3;
+
+      const normDir = dirVec.clone().normalize();
+      const speed = (14 + power * 24) * atkBonus;
+
+      ballState.owner = null;
+      ballState.vel.set(
+        normDir.x * speed,
+        (2.2 + power * 7.8) * loft * 4.2,
+        normDir.z * speed
+      );
+      // Magnus curve spin on Y axis
+      ballState.spin.set(0, curveSpin * techBonus * 6.5, 0);
+
+      kicker.kickCooldown = 0.35;
+      kicker.rightLeg.rotation.x = -0.95;
+      GameState.lastTouchTeam = kicker.team;
+      SoundEngine.playKick(power);
+    }
+
+    function executePass(passer, isThroughBall = false) {
+      // Find best teammate in facing direction
+      const facing = new THREE.Vector3(Math.sin(passer.mesh.rotation.y), 0, Math.cos(passer.mesh.rotation.y));
+      let bestMate = null;
+      let bestScore = -999;
+
+      players.forEach(mate => {
+        if (mate.team !== passer.team || mate === passer || mate.isGK) return;
+        const toMate = mate.mesh.position.clone().sub(passer.mesh.position);
+        const dist = toMate.length();
+        if (dist < 3 || dist > 48) return;
+        const align = facing.dot(toMate.clone().normalize());
+        const forwardGain = passer.team === "HOME" ? toMate.x : -toMate.x;
+        const score = align * 28 + (isThroughBall ? forwardGain * 0.55 : 0) - dist * 0.22;
+        if (score > bestScore) {
+          bestScore = score;
+          bestMate = mate;
+        }
+      });
+
+      const passAccuracy = 0.82 + (passer.nation.mid / 100) * 0.18;
+      let targetPos;
+      if (bestMate) {
+        const lead = isThroughBall ? (passer.team === "HOME" ? 6.5 : -6.5) : 1.5;
+        targetPos = bestMate.mesh.position.clone().add(new THREE.Vector3(lead, 0, bestMate.vel.z * 0.35));
+        if (passer.team === "HOME") controlledPlayer = bestMate;
+      } else {
+        targetPos = passer.mesh.position.clone().add(facing.multiplyScalar(16));
+      }
+
+      const dir = targetPos.sub(ballState.pos);
+      const dist = dir.length();
+      const power = Math.min(0.88, Math.max(0.32, (dist / 36) * passAccuracy));
+      kickBall(passer, dir, power, isThroughBall ? 0.18 : 0.06, 0);
+      setCommentary(`${passer.nation.name} (#${passer.num}) threads a crisp ${isThroughBall ? "through-ball" : "pass"}!`);
+    }
+
+    function executeShot(shooter, chargeAmount) {
+      const targetGoalX = shooter.team === "HOME" ? PITCH_W / 2 : -PITCH_W / 2;
+      // Aim slightly toward the far corner based on shooter's Z position
+      const aimZ = shooter.mesh.position.z > 0 ? -2.3 : 2.3;
+      const aimPoint = new THREE.Vector3(targetGoalX, 0, aimZ);
+      const dir = aimPoint.sub(ballState.pos);
+      const curve = shooter.mesh.position.z > 0 ? -1.15 : 1.15;
+
+      kickBall(shooter, dir, Math.max(0.45, chargeAmount), 0.24 + chargeAmount * 0.16, curve);
+      setCommentary(`⚡ ${shooter.nation.name} #${shooter.num} unleashes a curling strike!`);
+    }
+
+    function switchControlledPlayer() {
+      let best = null;
+      let minDist = Infinity;
+      players.forEach(p => {
+        if (p.team !== "HOME" || p === controlledPlayer || p.isGK) return;
+        const d = p.mesh.position.distanceTo(ballState.pos);
+        if (d < minDist) {
+          minDist = d;
+          best = p;
+        }
+      });
+      if (best) controlledPlayer = best;
+    }
+
+    function updatePhysicsAndAI(dt) {
+      if (!GameState.isPlaying || GameState.isGoalCelebration || GameState.isPeriodBreak || GameState.matchEnded) return;
+
+      // Handle Active Set-Piece (Throw-In, Goal Kick, Corner Kick, Free Kick)
+      if (GameState.setPieceState) {
+        updateSetPieceExecution(dt);
+        updateOfficials(dt);
+        return;
+      }
+
+      // Match Clock: strictly runs 00:00 -> 45:00 (1st Half) and 45:00 -> 90:00 (2nd Half)
+      if (GameState.clockRunning) {
+        GameState.matchSeconds += dt * 24;
+        const halfTargetSeconds = GameState.half === 1 ? 45 * 60 : 90 * 60;
+        if (GameState.matchSeconds >= halfTargetSeconds) {
+          GameState.matchSeconds = halfTargetSeconds;
+          updateClockDisplay();
+          if (GameState.half === 1) {
+            triggerHalfTime();
+          } else {
+            triggerFullTime();
+          }
+          return;
+        }
+        updateClockDisplay();
+      }
+
+      // Shot Charging
+      if (GameState.shotCharging) {
+        GameState.shotCharge = Math.min(1, GameState.shotCharge + dt * 1.45);
+        const pw = document.getElementById("powerBarWrapper");
+        pw.style.opacity = "1";
+        document.getElementById("powerBarFill").style.width = `${Math.round(GameState.shotCharge * 100)}%`;
+      }
+
+      // 1. Update Ball Physics & Magnus Spin Curve
+      if (ballState.owner) {
+        const owner = ballState.owner;
+        const forward = new THREE.Vector3(Math.sin(owner.mesh.rotation.y), 0, Math.cos(owner.mesh.rotation.y));
+        const dribbleOffset = Math.sin(owner.animPhase * 2) * 0.14;
+        ballState.pos.copy(owner.mesh.position).add(forward.multiplyScalar(0.68 + dribbleOffset));
+        ballState.pos.y = ballState.radius;
+        ballState.vel.copy(owner.vel);
+        ballMesh.rotation.x += owner.vel.length() * dt * 2.5;
+        GameState.lastTouchTeam = owner.team;
+      } else {
+        // Gravity
+        if (ballState.pos.y > ballState.radius || ballState.vel.y > 0) {
+          ballState.vel.y -= 19.6 * dt;
+        }
+        // Magnus effect (spin curves velocity laterally)
+        const magnusForce = new THREE.Vector3().crossVectors(ballState.spin, ballState.vel).multiplyScalar(0.032 * dt);
+        ballState.vel.add(magnusForce);
+        ballState.spin.multiplyScalar(1 - 0.85 * dt);
+
+        ballState.pos.addScaledVector(ballState.vel, dt);
+
+        // Turf Bounce & Friction
+        if (ballState.pos.y <= ballState.radius) {
+          ballState.pos.y = ballState.radius;
+          if (ballState.vel.y < -1.2) {
+            ballState.vel.y = -ballState.vel.y * 0.56;
+          } else {
+            ballState.vel.y = 0;
+          }
+          ballState.vel.x *= (1 - 1.35 * dt);
+          ballState.vel.z *= (1 - 1.35 * dt);
+        } else {
+          ballState.vel.multiplyScalar(1 - 0.22 * dt);
+        }
+
+        ballMesh.rotation.z -= ballState.vel.x * dt * 2.2;
+        ballMesh.rotation.x += ballState.vel.z * dt * 2.2;
+      }
+
+      ballMesh.position.copy(ballState.pos);
+      ballShadowMesh.position.set(ballState.pos.x, 0.025, ballState.pos.z);
+      const shadowScale = Math.max(0.45, 1 - ballState.pos.y * 0.12);
+      ballShadowMesh.scale.set(shadowScale, shadowScale, 1);
+
+      // 2. Check Goal Detection & Official Ball Out-of-Play Rules
+      checkGoalsAndBounds();
+
+      // 3. Update All Players (Human Controlled + AI Teammates & Opponents)
+      updateAllPlayers(dt);
+
+      // 4. Update Referee ("Judge") & Linesmen
+      updateOfficials(dt);
+
+      // Record frame for 4K Slow-Mo Goal Replay
+      recordReplayFrame();
+    }
+
+    function updateClockDisplay() {
+      const mins = Math.floor(GameState.matchSeconds / 60);
+      const secs = Math.floor(GameState.matchSeconds % 60);
+      document.getElementById("hudClock").textContent =
+        `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    }
+
+    function triggerHalfTime() {
+      GameState.isPeriodBreak = true;
+      GameState.clockRunning = false;
+      SoundEngine.playWhistle(true);
+      if (refereeObj) {
+        refereeObj.gestureTimer = 2.2;
+        refereeObj.gestureType = "WHISTLE";
+      }
+
+      document.getElementById("hudPeriod").textContent = "HALF-TIME";
+      document.getElementById("periodBadge").textContent = "HALF-TIME • 45:00";
+      document.getElementById("periodHeading").textContent = "END OF FIRST HALF";
+      document.getElementById("ftHomeFlag").textContent = GameState.homeNation.flag;
+      document.getElementById("ftHomeName").textContent = GameState.homeNation.code;
+      document.getElementById("ftHomeScore").textContent = GameState.homeScore;
+      document.getElementById("ftAwayFlag").textContent = GameState.awayNation.flag;
+      document.getElementById("ftAwayName").textContent = GameState.awayNation.code;
+      document.getElementById("ftAwayScore").textContent = GameState.awayScore;
+      document.getElementById("periodSubtext").textContent =
+        `${GameState.homeNation.name} and ${GameState.awayNation.name} head to the tunnel. Click below to kick off the 2nd Half at 45:00.`;
+
+      document.getElementById("btnResumeSecondHalf").classList.remove("hidden");
+      document.getElementById("btnRematch").classList.add("hidden");
+      document.getElementById("btnBackToLobby").classList.add("hidden");
+      document.getElementById("matchPeriodModal").classList.remove("hidden");
+      setCommentary("HALF-TIME (45:00)! The referee blows the whistle for the interval.");
+    }
+
+    function triggerFullTime() {
+      GameState.isPeriodBreak = true;
+      GameState.matchEnded = true;
+      GameState.clockRunning = false;
+      SoundEngine.playWhistle(true);
+      setTimeout(() => SoundEngine.playWhistle(true), 360);
+      if (refereeObj) {
+        refereeObj.gestureTimer = 3.0;
+        refereeObj.gestureType = "WHISTLE";
+      }
+
+      document.getElementById("hudPeriod").textContent = "FULL-TIME";
+      document.getElementById("periodBadge").textContent = "FULL-TIME • 90:00";
+      const winnerText =
+        GameState.homeScore > GameState.awayScore ? `${GameState.homeNation.name.toUpperCase()} WINS!` :
+        GameState.awayScore > GameState.homeScore ? `${GameState.awayNation.name.toUpperCase()} WINS!` :
+        "WORLD CUP DRAW!";
+      document.getElementById("periodHeading").textContent = winnerText;
+      document.getElementById("ftHomeFlag").textContent = GameState.homeNation.flag;
+      document.getElementById("ftHomeName").textContent = GameState.homeNation.code;
+      document.getElementById("ftHomeScore").textContent = GameState.homeScore;
+      document.getElementById("ftAwayFlag").textContent = GameState.awayNation.flag;
+      document.getElementById("ftAwayName").textContent = GameState.awayNation.code;
+      document.getElementById("ftAwayScore").textContent = GameState.awayScore;
+      document.getElementById("periodSubtext").textContent =
+        `Final Whistle at 90:00! Full-time result between ${GameState.homeNation.name} and ${GameState.awayNation.name}.`;
+
+      document.getElementById("btnResumeSecondHalf").classList.add("hidden");
+      document.getElementById("btnRematch").classList.remove("hidden");
+      document.getElementById("btnBackToLobby").classList.remove("hidden");
+      document.getElementById("matchPeriodModal").classList.remove("hidden");
+      setCommentary(`FULL-TIME (90:00)! ${winnerText}`);
+    }
+
+    function showSetPieceCallout(icon, title, subtitle) {
+      const banner = document.getElementById("setPieceBanner");
+      document.getElementById("setPieceIcon").textContent = icon;
+      document.getElementById("setPieceTitle").textContent = title;
+      document.getElementById("setPieceSub").textContent = subtitle;
+      banner.classList.remove("hidden");
+      clearTimeout(banner._hideTimer);
+      banner._hideTimer = setTimeout(() => banner.classList.add("hidden"), 2300);
+    }
+
+    function startSetPiece(type, awardedTeam, spotVec, showCard = false) {
+      ballState.owner = null;
+      ballState.vel.set(0, 0, 0);
+      ballState.spin.set(0, 0, 0);
+      ballState.pos.copy(spotVec);
+      ballMesh.position.copy(spotVec);
+
+      const nation = awardedTeam === "HOME" ? GameState.homeNation : GameState.awayNation;
+      // Pick closest outfield player of awardedTeam as executor
+      let executor = null;
+      let minD = Infinity;
+      players.forEach(p => {
+        if (p.team !== awardedTeam || p.isGK) return;
+        const d = p.mesh.position.distanceTo(spotVec);
+        if (d < minD) { minD = d; executor = p; }
+      });
+
+      if (executor) {
+        executor.mesh.position.set(spotVec.x, 0, spotVec.z);
+        if (awardedTeam === "HOME") controlledPlayer = executor;
+      }
+
+      SoundEngine.playWhistle(false);
+      if (refereeObj) {
+        refereeObj.gestureTimer = 1.6;
+        refereeObj.gestureType = showCard ? "CARD" : (awardedTeam === "HOME" ? "POINT_RIGHT" : "POINT_LEFT");
+        if (refereeObj.group.userData.refCard) {
+          refereeObj.group.userData.refCard.visible = showCard;
+        }
+      }
+
+      // Raise touchline linesman flag for Throw-Ins, Corners & Goal Kicks
+      if (type === "THROW_IN") {
+        const lm = linesmenObjs.find(l => Math.sign(l.sideSign) === Math.sign(spotVec.z));
+        if (lm) lm.flagRaiseTimer = 1.8;
+      } else if (type === "CORNER_KICK" || type === "GOAL_KICK") {
+        linesmenObjs.forEach(l => l.flagRaiseTimer = 1.5);
+      }
+
+      const iconMap = { THROW_IN: "👐", GOAL_KICK: "🧤", CORNER_KICK: "🚩", FREE_KICK: "🟨" };
+      const titleMap = {
+        THROW_IN: `THROW-IN • ${nation.code}`,
+        GOAL_KICK: `GOAL KICK • ${nation.code}`,
+        CORNER_KICK: `CORNER KICK • ${nation.code}`,
+        FREE_KICK: showCard ? `YELLOW CARD & FREE KICK • ${nation.code}` : `FREE KICK • ${nation.code}`
+      };
+      showSetPieceCallout(iconMap[type], titleMap[type], `${nation.flag} ${nation.name} restarts play`);
+      setCommentary(`${titleMap[type]} — Referee awards restart to ${nation.name}.`);
+
+      GameState.setPieceState = {
+        type,
+        team: awardedTeam,
+        spot: spotVec.clone(),
+        timer: 1.05,
+        executor
+      };
+    }
+
+    function updateSetPieceExecution(dt) {
+      const sp = GameState.setPieceState;
+      if (!sp) return;
+      sp.timer -= dt;
+
+      if (sp.executor) {
+        const inwardDir = new THREE.Vector3(-sp.spot.x * 0.2, 0, -sp.spot.z * 0.4);
+        if (sp.type === "GOAL_KICK" || sp.type === "FREE_KICK") {
+          inwardDir.set(sp.team === "HOME" ? 1 : -1, 0, 0);
+        }
+        sp.executor.mesh.rotation.y = Math.atan2(inwardDir.x, inwardDir.z);
+
+        // Overhead two-handed throw-in pose
+        if (sp.type === "THROW_IN") {
+          sp.executor.leftArm.rotation.x = -2.6;
+          sp.executor.rightArm.rotation.x = -2.6;
+          ballState.pos.set(sp.spot.x, 1.82, sp.spot.z);
+          ballMesh.position.copy(ballState.pos);
+        }
+      }
+
+      if (sp.timer <= 0) {
+        const exec = sp.executor;
+        if (exec) {
+          exec.leftArm.rotation.x = 0;
+          exec.rightArm.rotation.x = 0;
+          ballState.pos.set(sp.spot.x, ballState.radius, sp.spot.z);
+
+          if (sp.type === "THROW_IN") {
+            executePass(exec, false);
+          } else if (sp.type === "GOAL_KICK") {
+            const targetDir = new THREE.Vector3(sp.team === "HOME" ? 1 : -1, 0, (Math.random() - 0.5) * 0.5);
+            kickBall(exec, targetDir, 0.85, 0.42, 0);
+          } else if (sp.type === "CORNER_KICK") {
+            const targetBoxX = sp.team === "HOME" ? PITCH_W / 2 - 9 : -PITCH_W / 2 + 9;
+            const targetDir = new THREE.Vector3(targetBoxX - sp.spot.x, 0, -sp.spot.z * 0.85);
+            kickBall(exec, targetDir, 0.78, 0.44, sp.spot.z > 0 ? -1.4 : 1.4);
+          } else {
+            executePass(exec, true);
+          }
+        }
+        GameState.setPieceState = null;
+      }
+    }
+
+    function updateOfficials(dt) {
+      if (!refereeObj) return;
+
+      // Referee ("Judge") tracks the play dynamically at a safe 8-11m tactical diagonal offset
+      const desiredRefX = Math.max(-PITCH_W / 2 + 6, Math.min(PITCH_W / 2 - 6, ballState.pos.x - 6.5));
+      const desiredRefZ = Math.max(-PITCH_H / 2 + 4, Math.min(PITCH_H / 2 - 4, ballState.pos.z + (ballState.pos.z > 0 ? -9.5 : 9.5)));
+      const targetPos = new THREE.Vector3(desiredRefX, 0, desiredRefZ);
+      const toTarget = targetPos.sub(refereeObj.group.position);
+      const dist = toTarget.length();
+
+      if (dist > 0.6) {
+        const move = toTarget.normalize().multiplyScalar(Math.min(7.8, dist * 2.1));
+        refereeObj.vel.lerp(move, Math.min(1, dt * 8));
+        refereeObj.group.position.addScaledVector(refereeObj.vel, dt);
+        refereeObj.animPhase += dt * refereeObj.vel.length() * 1.45;
+        const swing = Math.sin(refereeObj.animPhase) * 0.65;
+        refereeObj.leftLeg.rotation.x = swing;
+        refereeObj.rightLeg.rotation.x = -swing;
+      } else {
+        refereeObj.leftLeg.rotation.x *= 0.8;
+        refereeObj.rightLeg.rotation.x *= 0.8;
+      }
+
+      // Referee always faces the ball
+      const lookAngle = Math.atan2(ballState.pos.x - refereeObj.group.position.x, ballState.pos.z - refereeObj.group.position.z);
+      refereeObj.group.rotation.y = lookAngle;
+
+      // Referee Whistle / Card / Direction Arm Gestures
+      if (refereeObj.gestureTimer > 0) {
+        refereeObj.gestureTimer -= dt;
+        if (refereeObj.gestureType === "CARD") {
+          refereeObj.rightArm.rotation.x = -2.85;
+        } else if (refereeObj.gestureType === "WHISTLE") {
+          refereeObj.rightArm.rotation.x = -2.1;
+          refereeObj.rightArm.rotation.z = -0.45;
+        } else {
+          refereeObj.rightArm.rotation.x = -1.55;
+        }
+      } else {
+        if (refereeObj.group.userData.refCard) refereeObj.group.userData.refCard.visible = false;
+        refereeObj.rightArm.rotation.x *= 0.82;
+        refereeObj.rightArm.rotation.z *= 0.82;
+      }
+
+      // Linesmen patrol their touchlines along the ball's X-line
+      linesmenObjs.forEach(lm => {
+        const targetX = Math.max(-PITCH_W / 2 + 2, Math.min(PITCH_W / 2 - 2, ballState.pos.x));
+        const dx = targetX - lm.group.position.x;
+        if (Math.abs(dx) > 0.3) {
+          lm.group.position.x += Math.sign(dx) * Math.min(Math.abs(dx), 6.5 * dt);
+          lm.animPhase += dt * 8;
+          lm.leftLeg.rotation.x = Math.sin(lm.animPhase) * 0.5;
+          lm.rightLeg.rotation.x = -Math.sin(lm.animPhase) * 0.5;
+        } else {
+          lm.leftLeg.rotation.x *= 0.8;
+          lm.rightLeg.rotation.x *= 0.8;
+        }
+        lm.group.rotation.y = lm.sideSign === 1 ? Math.PI : 0;
+
+        if (lm.flagRaiseTimer > 0) {
+          lm.flagRaiseTimer -= dt;
+          lm.rightArm.rotation.x = -2.75;
+        } else {
+          lm.rightArm.rotation.x *= 0.82;
+        }
+      });
+    }
+
+    function checkGoalsAndBounds() {
+      const halfW = PITCH_W / 2;
+      const halfH = PITCH_H / 2;
+      const inGoalZ = Math.abs(ballState.pos.z) < (GOAL_W / 2 - 0.15);
+      const inGoalY = ballState.pos.y < GOAL_H;
+
+      // 1. Goal scored!
+      if (inGoalZ && inGoalY) {
+        if (ballState.pos.x > halfW + 0.25) {
+          triggerGoal("HOME");
+          return;
+        } else if (ballState.pos.x < -halfW - 0.25) {
+          triggerGoal("AWAY");
+          return;
+        }
+      }
+
+      // 2. Goalpost / Crossbar metallic ping
+      if (Math.abs(Math.abs(ballState.pos.x) - halfW) < 0.35 && inGoalY) {
+        if (Math.abs(Math.abs(ballState.pos.z) - GOAL_W / 2) < 0.28) {
+          ballState.vel.x = -ballState.vel.x * 0.72;
+          ballState.vel.z += (Math.random() - 0.5) * 4;
+          SoundEngine.playPostPing();
+          setCommentary("OFF THE POST! Inches away from a World Cup screamer!");
+          return;
+        }
+      }
+
+      // 3. Touchline Out of Play -> Official THROW-IN
+      if (Math.abs(ballState.pos.z) > halfH + 0.22) {
+        const awardedTeam = GameState.lastTouchTeam === "HOME" ? "AWAY" : "HOME";
+        const clampedX = Math.max(-halfW + 1.5, Math.min(halfW - 1.5, ballState.pos.x));
+        const edgeZ = Math.sign(ballState.pos.z) * halfH;
+        startSetPiece("THROW_IN", awardedTeam, new THREE.Vector3(clampedX, ballState.radius, edgeZ), false);
+        return;
+      }
+
+      // 4. Endline Out of Play (outside goal mouth) -> GOAL KICK or CORNER KICK
+      if (Math.abs(ballState.pos.x) > halfW + 0.22 && (!inGoalZ || !inGoalY)) {
+        const exitedRightEnd = ballState.pos.x > 0; // Right end is Away's goal
+        const defendingTeam = exitedRightEnd ? "AWAY" : "HOME";
+        const attackingTeam = exitedRightEnd ? "HOME" : "AWAY";
+
+        if (GameState.lastTouchTeam === attackingTeam) {
+          // Last touched by attackers -> GOAL KICK for defenders
+          const gkSpotX = exitedRightEnd ? (halfW - 5.5) : (-halfW + 5.5);
+          const gkSpotZ = ballState.pos.z >= 0 ? 4.5 : -4.5;
+          startSetPiece("GOAL_KICK", defendingTeam, new THREE.Vector3(gkSpotX, ballState.radius, gkSpotZ), false);
+        } else {
+          // Last touched by defenders -> CORNER KICK for attackers
+          const cornerX = exitedRightEnd ? (halfW - 0.4) : (-halfW + 0.4);
+          const cornerZ = ballState.pos.z >= 0 ? (halfH - 0.4) : (-halfH + 0.4);
+          startSetPiece("CORNER_KICK", attackingTeam, new THREE.Vector3(cornerX, ballState.radius, cornerZ), false);
+        }
+      }
+    }
+
+    function triggerGoal(scoringTeam) {
+      if (GameState.isGoalCelebration) return;
+      GameState.isGoalCelebration = true;
+      ballState.owner = null;
+      ballState.vel.multiplyScalar(0.25);
+
+      netDeformTimer = 1.4;
+      netDeformSide = scoringTeam === "HOME" ? 1 : -1;
+
+      if (scoringTeam === "HOME") GameState.homeScore++;
+      else GameState.awayScore++;
+
+      document.getElementById("hudHomeScore").textContent = GameState.homeScore;
+      document.getElementById("hudAwayScore").textContent = GameState.awayScore;
+
+      const scorerNation = scoringTeam === "HOME" ? GameState.homeNation : GameState.awayNation;
+      SoundEngine.playWhistle(false);
+      SoundEngine.playGoalRoar();
+
+      const overlay = document.getElementById("goalOverlay");
+      const box = document.getElementById("goalBannerBox");
+      document.getElementById("goalBannerTitle").textContent = `GOAL! ${scorerNation.flag}`;
+      document.getElementById("goalBannerSub").textContent =
+        `${GameState.homeNation.name.toUpperCase()} ${GameState.homeScore} - ${GameState.awayScore} ${GameState.awayNation.name.toUpperCase()}`;
+
+      overlay.classList.remove("hidden");
+      overlay.classList.add("flex");
+      box.classList.remove("goal-banner-active");
+      void box.offsetWidth;
+      box.classList.add("goal-banner-active");
+
+      setCommentary(`GOOOOOL! ${scorerNation.name} breaks the net! (${GameState.homeScore}-${GameState.awayScore})`);
+
+      // Start Instant Slow-Mo Replay after 2.2s, then reset kickoff
+      setTimeout(() => {
+        overlay.classList.add("hidden");
+        overlay.classList.remove("flex");
+        startInstantReplay(scoringTeam === "HOME" ? "AWAY" : "HOME");
+      }, 2300);
+    }
+
+    function recordReplayFrame() {
+      if (GameState.isReplay) return;
+      GameState.replayBuffer.push({
+        ball: ballState.pos.clone(),
+        players: players.map(p => ({ pos: p.mesh.position.clone(), rotY: p.mesh.rotation.y }))
+      });
+      if (GameState.replayBuffer.length > 160) {
+        GameState.replayBuffer.shift();
+      }
+    }
+
+    function startInstantReplay(nextKickoffTeam) {
+      if (GameState.replayBuffer.length < 30) {
+        GameState.isGoalCelebration = false;
+        resetKickoffPositions(nextKickoffTeam);
+        return;
+      }
+      GameState.isReplay = true;
+      GameState.replayIndex = 0;
+      document.getElementById("replayIndicator").classList.remove("hidden");
+
+      setTimeout(() => {
+        GameState.isReplay = false;
+        GameState.isGoalCelebration = false;
+        GameState.replayBuffer = [];
+        document.getElementById("replayIndicator").classList.add("hidden");
+        resetKickoffPositions(nextKickoffTeam);
+      }, 3400);
+    }
+
+    function updateAllPlayers(dt) {
+      // Find closest AI player to ball for each team
+      let closestHomeAI = null, minHomeD = Infinity;
+      let closestAwayAI = null, minAwayD = Infinity;
+
+      players.forEach(p => {
+        const d = p.mesh.position.distanceTo(ballState.pos);
+        if (p.team === "HOME" && p !== controlledPlayer && !p.isGK && d < minHomeD) {
+          minHomeD = d;
+          closestHomeAI = p;
+        }
+        if (p.team === "AWAY" && !p.isGK && d < minAwayD) {
+          minAwayD = d;
+          closestAwayAI = p;
+        }
+      });
+
+      players.forEach(p => {
+        if (p.kickCooldown > 0) p.kickCooldown -= dt;
+        if (p.tackleCooldown > 0) p.tackleCooldown -= dt;
+
+        // Highlight ring
+        p.ring.material.opacity = (p === controlledPlayer) ? 0.9 : 0.0;
+
+        let moveVec = new THREE.Vector3(0, 0, 0);
+        let isSprinting = false;
+
+        if (p === controlledPlayer) {
+          // Human Keyboard + Virtual Analog Input
+          let ix = 0, iz = 0;
+          if (keys["ArrowUp"] || keys["KeyW"]) iz -= 1;
+          if (keys["ArrowDown"] || keys["KeyS"]) iz += 1;
+          if (keys["ArrowLeft"] || keys["KeyA"]) ix -= 1;
+          if (keys["ArrowRight"] || keys["KeyD"]) ix += 1;
+          if (joyVec.active) {
+            ix = joyVec.x;
+            iz = joyVec.y;
+          }
+
+          // Camera-relative adjustment when in End-to-End camera mode
+          if (GameState.cameraMode === 2) {
+            moveVec.set(-iz, 0, ix);
+          } else {
+            moveVec.set(ix, 0, iz);
+          }
+
+          isSprinting = (keys["ShiftLeft"] || keys["ShiftRight"]) && p.stamina > 5;
+          if (isSprinting && moveVec.lengthSq() > 0.01) {
+            p.stamina = Math.max(0, p.stamina - dt * 18);
+          } else {
+            p.stamina = Math.min(100, p.stamina + dt * 11);
+          }
+
+          document.getElementById("activePlayerNum").textContent = p.num;
+          document.getElementById("activePlayerRole").textContent = `${p.nation.code} • #${p.num} ${p.role}`;
+          document.getElementById("activeStaminaBar").style.width = `${Math.round(p.stamina)}%`;
+        } else if (p.isGK) {
+          // Goalkeeper AI: tracks ball along goal line & dives/clears
+          const goalX = p.team === "HOME" ? -PITCH_W / 2 + 1.2 : PITCH_W / 2 - 1.2;
+          const targetZ = Math.max(-GOAL_W / 2 + 0.4, Math.min(GOAL_W / 2 - 0.4, ballState.pos.z * 0.72));
+          const target = new THREE.Vector3(goalX, 0, targetZ);
+          const toTarget = target.sub(p.mesh.position);
+          if (toTarget.length() > 0.25) {
+            moveVec.copy(toTarget.normalize());
+          }
+          // GK auto-clear if ball is right in front of goal
+          if (p.mesh.position.distanceTo(ballState.pos) < 1.35 && p.kickCooldown <= 0) {
+            const clearDir = new THREE.Vector3(p.team === "HOME" ? 1 : -1, 0, (Math.random() - 0.5) * 0.8);
+            kickBall(p, clearDir, 0.78, 0.35, 0);
+            setCommentary(`🧤 ${p.nation.name} Goalkeeper makes a commanding clearance!`);
+          }
+        } else {
+          // Tactical AI Positioning driven by Nation's retrieved Capabilities
+          const isChaser = (p === closestHomeAI) || (p === closestAwayAI);
+          const attackDir = p.team === "HOME" ? 1 : -1;
+          const teamHasBall = ballState.owner && ballState.owner.team === p.team;
+          const pressAggression = (p.nation.def + p.nation.phys) / 200; // 0.55 to 0.96
+
+          if (ballState.owner === p) {
+            // AI Ball Carrier Decision Making (Dribble, Pass, or Shoot!)
+            const oppGoalX = attackDir * (PITCH_W / 2);
+            const distToGoal = Math.abs(oppGoalX - p.mesh.position.x);
+
+            if (distToGoal < 24 && Math.random() < 0.045 * (p.nation.atk / 85)) {
+              executeShot(p, 0.65 + Math.random() * 0.28);
+            } else if (Math.random() < 0.028 * (p.nation.mid / 85)) {
+              executePass(p, Math.random() < 0.35);
+            } else {
+              // Dribble towards opponent box with slight weaving
+              const target = new THREE.Vector3(oppGoalX - attackDir * 10, 0, Math.sin(GameState.matchSeconds * 0.1 + p.num) * 12);
+              moveVec = target.sub(p.mesh.position).normalize();
+              isSprinting = p.nation.pace > 86;
+            }
+          } else if (isChaser && !teamHasBall) {
+            // Press the ball carrier
+            moveVec = ballState.pos.clone().sub(p.mesh.position).normalize();
+            isSprinting = pressAggression > 0.82;
+          } else {
+            // Dynamic Formation Shift based on ball X position & tactical style
+            const ballShiftX = ballState.pos.x * (teamHasBall ? 0.52 : 0.38 * pressAggression);
+            const ballShiftZ = ballState.pos.z * 0.32;
+            const targetPos = new THREE.Vector3(
+              Math.max(-PITCH_W / 2 + 4, Math.min(PITCH_W / 2 - 4, p.homePos.x + ballShiftX)),
+              0,
+              Math.max(-PITCH_H / 2 + 3, Math.min(PITCH_H / 2 - 3, p.homePos.z + ballShiftZ))
+            );
+            const diff = targetPos.sub(p.mesh.position);
+            if (diff.length() > 1.2) {
+              moveVec = diff.normalize();
+            }
+          }
+        }
+
+        // Apply Velocity & Smooth Rotation
+        if (moveVec.lengthSq() > 0.001) {
+          moveVec.normalize();
+          const speed = getEffectivePlayerSpeed(p) * (isSprinting ? 1.32 : 1.0);
+          p.vel.lerp(moveVec.multiplyScalar(speed), Math.min(1, dt * 10));
+          const targetAngle = Math.atan2(p.vel.x, p.vel.z);
+          p.mesh.rotation.y = targetAngle;
+        } else {
+          p.vel.multiplyScalar(Math.max(0, 1 - dt * 10));
+        }
+
+        p.mesh.position.addScaledVector(p.vel, dt);
+        p.mesh.position.x = Math.max(-PITCH_W / 2 - 1, Math.min(PITCH_W / 2 + 1, p.mesh.position.x));
+        p.mesh.position.z = Math.max(-PITCH_H / 2 - 1, Math.min(PITCH_H / 2 + 1, p.mesh.position.z));
+
+        // Procedural Running & Kicking Limb Animation
+        const spd = p.vel.length();
+        if (spd > 0.4) {
+          p.animPhase += dt * spd * 1.45;
+          const swing = Math.sin(p.animPhase) * Math.min(0.85, spd * 0.075);
+          p.leftLeg.rotation.x = swing;
+          p.rightLeg.rotation.x = -swing;
+          p.leftArm.rotation.x = -swing * 0.65;
+          p.rightArm.rotation.x = swing * 0.65;
+          p.torso.rotation.x = Math.min(0.22, spd * 0.018);
+        } else {
+          p.leftLeg.rotation.x *= 0.82;
+          p.rightLeg.rotation.x *= 0.82;
+          p.leftArm.rotation.x *= 0.82;
+          p.rightArm.rotation.x *= 0.82;
+          p.torso.rotation.x *= 0.82;
+        }
+
+        // Ball Control / Interception / Tackle Check
+        if (p.kickCooldown <= 0 && ballState.pos.y < 1.35) {
+          const distToBall = p.mesh.position.distanceTo(new THREE.Vector3(ballState.pos.x, 0, ballState.pos.z));
+          if (distToBall < 0.92) {
+            if (!ballState.owner) {
+              ballState.owner = p;
+              if (p.team === "HOME" && !p.isGK) controlledPlayer = p;
+            } else if (ballState.owner.team !== p.team && p.tackleCooldown <= 0) {
+              // Physicality & Defending duel check
+              const winChance = (p.nation.def + p.nation.phys) / (ballState.owner.nation.tech + ballState.owner.nation.phys + 40);
+              if (Math.random() < winChance * 0.25) {
+                const victim = ballState.owner;
+                // Reckless tackle from behind triggers Referee Whistle + Free Kick / Yellow Card
+                if (p.vel.length() > 12.5 && Math.random() < 0.08) {
+                  const freeKickSpot = victim.mesh.position.clone();
+                  startSetPiece("FREE_KICK", victim.team, freeKickSpot, Math.random() < 0.45);
+                  return;
+                }
+                victim.tackleCooldown = 0.85;
+                ballState.owner = p;
+                if (p.team === "HOME" && !p.isGK) controlledPlayer = p;
+                SoundEngine.playKick(0.35);
+              }
+            }
+          }
+        }
+      });
+    }
+
+    /**
+     * ============================================================================
+     * 7. BROADCAST CAMERAS, 2D RADAR MINIMAP & MAIN ANIMATION LOOP
+     * ============================================================================
+     */
+    const CAMERA_MODES = ["Tele Broadcast", "Pro Action Cam", "End-to-End", "Tactical Top"];
+
+    function updateCamera(dt) {
+      if (GameState.isReplay && GameState.replayBuffer.length > 0) {
+        const frame = GameState.replayBuffer[Math.floor(GameState.replayIndex)];
+        if (frame) {
+          ballMesh.position.copy(frame.ball);
+          frame.players.forEach((fp, idx) => {
+            if (players[idx]) {
+              players[idx].mesh.position.copy(fp.pos);
+              players[idx].mesh.rotation.y = fp.rotY;
+            }
+          });
+          camera.position.lerp(new THREE.Vector3(frame.ball.x * 0.85, 8.5, frame.ball.z + 15), dt * 4);
+          camera.lookAt(frame.ball);
+          GameState.replayIndex = Math.min(GameState.replayBuffer.length - 1, GameState.replayIndex + 0.42);
+        }
+        return;
+      }
+
+      const focus = ballState.pos;
+      const targetCam = new THREE.Vector3();
+      const lookTarget = new THREE.Vector3(focus.x * 0.92, 0.8, focus.z * 0.85);
+
+      if (GameState.cameraMode === 0) {
+        // Tele Broadcast TV Cam
+        targetCam.set(focus.x * 0.72, 26 + Math.abs(focus.z) * 0.14, 38 + focus.z * 0.35);
+      } else if (GameState.cameraMode === 1) {
+        // Pro Low Action Cam
+        const p = controlledPlayer || ballMesh;
+        targetCam.set(p.mesh ? p.mesh.position.x - 16 : focus.x - 16, 11.5, (p.mesh ? p.mesh.position.z : focus.z) * 0.85 + 14);
+        lookTarget.set(focus.x + 6, 1.0, focus.z);
+      } else if (GameState.cameraMode === 2) {
+        // End-to-End Behind Home Goal
+        targetCam.set(focus.x - 24, 15.5, focus.z * 0.65);
+        lookTarget.set(focus.x + 14, 0.8, focus.z * 0.85);
+      } else {
+        // Tactical Manager Top View
+        targetCam.set(focus.x * 0.5, 52, 18);
+      }
+
+      camera.position.lerp(targetCam, Math.min(1, dt * 4.5));
+      camera.lookAt(lookTarget);
+    }
+
+    function drawRadarMinimap() {
+      const rc = document.getElementById("radarCanvas");
+      if (!rc) return;
+      const ctx = rc.getContext("2d");
+      const w = rc.width;
+      const h = rc.height;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "rgba(6, 78, 59, 0.88)";
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(4, 4, w - 8, h - 8);
+      ctx.beginPath();
+      ctx.moveTo(w / 2, 4);
+      ctx.lineTo(w / 2, h - 4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, 14, 0, Math.PI * 2);
+      ctx.stroke();
+
+      const mapX = x => ((x + PITCH_W / 2) / PITCH_W) * (w - 12) + 6;
+      const mapZ = z => ((z + PITCH_H / 2) / PITCH_H) * (h - 12) + 6;
+
+      players.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(mapX(p.mesh.position.x), mapZ(p.mesh.position.z), p === controlledPlayer ? 4.2 : 3, 0, Math.PI * 2);
+        ctx.fillStyle = p.team === "HOME" ? GameState.homeNation.primary : GameState.awayNation.primary;
+        ctx.fill();
+        ctx.strokeStyle = p === controlledPlayer ? "#38bdf8" : "#000000";
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      });
+
+      // Ball dot
+      ctx.beginPath();
+      ctx.arc(mapX(ballState.pos.x), mapZ(ballState.pos.z), 3.4, 0, Math.PI * 2);
+      ctx.fillStyle = "#facc15";
+      ctx.fill();
+    }
+
+    let lastTime = performance.now();
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+
+      // Subtle animated crowd wave
+      if (crowdInstanced) {
+        crowdInstanced.position.y = Math.sin(now * 0.004) * (GameState.isGoalCelebration ? 0.45 : 0.06);
+      }
+
+      // Goal Net Billow Effect
+      if (netDeformTimer > 0) {
+        netDeformTimer -= dt;
+        const targetNet = netDeformSide > 0 ? awayNetMesh : homeNetMesh;
+        if (targetNet) {
+          targetNet.scale.x = 1 + Math.sin(netDeformTimer * 18) * 0.25 * netDeformTimer;
+        }
+      }
+
+      updatePhysicsAndAI(dt);
+      updateCamera(dt);
+      drawRadarMinimap();
+      renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+      if (!renderer || !camera) return;
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      const scale = parseFloat(document.getElementById("resSelector").value || "1.25");
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2) * scale);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    /**
+     * ============================================================================
+     * 8. UI RENDERING: 211+ NATIONS ROSTER, STAT BARS & EVENT HANDLERS
+     * ============================================================================
+     */
+    function setCommentary(text) {
+      document.getElementById("liveCommentaryText").textContent = text;
+    }
+
+    function renderStatBars(containerId, nation, accentClass) {
+      const container = document.getElementById(containerId);
+      const stats = [
+        { label: "Attack", val: nation.atk },
+        { label: "Midfield", val: nation.mid },
+        { label: "Defense", val: nation.def },
+        { label: "Pace", val: nation.pace },
+        { label: "Physical", val: nation.phys },
+        { label: "Technique", val: nation.tech }
+      ];
+      container.innerHTML = stats.map(s => `
+        <div class="flex items-center gap-2">
+          <span class="w-16 text-slate-400 font-semibold">${s.label}</span>
+          <div class="flex-1 h-2 bg-slate-950 rounded-full overflow-hidden border border-white/5">
+            <div class="h-full ${accentClass} rounded-full transition-all duration-300" style="width: ${s.val}%"></div>
+          </div>
+          <span class="w-7 text-right font-broadcast font-bold text-white">${s.val}</span>
+        </div>
+      `).join("");
+    }
+
+    function updateMatchupCards() {
+      const h = GameState.homeNation;
+      const a = GameState.awayNation;
+
+      document.getElementById("homeConfedTag").textContent = h.confed;
+      document.getElementById("homeFlagBig").textContent = h.flag;
+      document.getElementById("homeNameBig").textContent = h.name;
+      document.getElementById("homeFormationTag").textContent = h.formation;
+      document.getElementById("homeStyleTag").textContent = h.style;
+      document.getElementById("homeOvrBig").textContent = h.ovr;
+      document.getElementById("homeScoutNotes").textContent = h.notes;
+      document.getElementById("homeScoutSource").textContent = h.scoutSource;
+      renderStatBars("homeStatsContainer", h, "bg-gradient-to-r from-sky-500 to-emerald-400");
+
+      document.getElementById("awayConfedTag").textContent = a.confed;
+      document.getElementById("awayFlagBig").textContent = a.flag;
+      document.getElementById("awayNameBig").textContent = a.name;
+      document.getElementById("awayFormationTag").textContent = a.formation;
+      document.getElementById("awayStyleTag").textContent = a.style;
+      document.getElementById("awayOvrBig").textContent = a.ovr;
+      document.getElementById("awayScoutNotes").textContent = a.notes;
+      document.getElementById("awayScoutSource").textContent = a.scoutSource;
+      renderStatBars("awayStatsContainer", a, "bg-gradient-to-r from-rose-500 to-amber-400");
+
+      // Sync Top Scorebug
+      document.getElementById("hudHomeFlag").textContent = h.flag;
+      document.getElementById("hudHomeCode").textContent = h.code;
+      document.getElementById("hudHomeColor").style.backgroundColor = h.primary;
+
+      document.getElementById("hudAwayFlag").textContent = a.flag;
+      document.getElementById("hudAwayCode").textContent = a.code;
+      document.getElementById("hudAwayColor").style.backgroundColor = a.primary;
+    }
+
+    function renderCountriesList() {
+      const query = document.getElementById("countrySearchInput").value.trim().toLowerCase();
+      const confed = document.getElementById("confedFilter").value;
+      const listEl = document.getElementById("countriesList");
+
+      const filtered = NATIONS_DB.filter(n => {
+        const matchConfed = confed === "ALL" || n.confed === confed;
+        const matchQuery = !query || n.name.toLowerCase().includes(query) || n.code.toLowerCase().includes(query);
+        return matchConfed && matchQuery;
+      });
+
+      document.getElementById("nationCountLabel").textContent = filtered.length;
+
+      listEl.innerHTML = filtered.map(n => {
+        const isHome = n.code === GameState.homeNation.code;
+        const isAway = n.code === GameState.awayNation.code;
+        let ringClass = "border-white/5 hover:border-white/25 bg-slate-950/65";
+        if (isHome) ringClass = "border-sky-400 bg-sky-950/50";
+        else if (isAway) ringClass = "border-rose-400 bg-rose-950/50";
+
+        return `
+          <button data-code="${n.code}" class="nation-row w-full flex items-center justify-between px-2.5 py-2 rounded-xl border ${ringClass} transition text-left cursor-pointer">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-lg leading-none">${n.flag}</span>
+              <div class="truncate">
+                <div class="text-xs font-bold text-white truncate">${n.name}</div>
+                <div class="text-[10px] text-slate-400">${n.code} • ${n.confed}</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              ${isHome ? '<span class="px-1.5 py-0.5 rounded bg-sky-500 text-slate-950 text-[9px] font-black">HOME</span>' : ''}
+              ${isAway ? '<span class="px-1.5 py-0.5 rounded bg-rose-500 text-white text-[9px] font-black">AWAY</span>' : ''}
+              <span class="w-2.5 h-4 rounded-sm border border-white/20" style="background:${n.primary}"></span>
+              <span class="font-broadcast font-bold text-sm text-amber-400 w-6 text-right">${n.ovr}</span>
+            </div>
+          </button>
+        `;
+      }).join("");
+
+      listEl.querySelectorAll(".nation-row").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const code = btn.getAttribute("data-code");
+          const chosen = NATIONS_DB.find(x => x.code === code);
+          if (!chosen) return;
+
+          if (GameState.assignMode === "HOME") {
+            GameState.homeNation = chosen;
+          } else {
+            GameState.awayNation = chosen;
+          }
+          updateMatchupCards();
+          renderCountriesList();
+
+          // Automatically trigger Rublix AI Capability Retrieval
+          chosen.scoutSource = "Scouting...";
+          updateMatchupCards();
+          await RublixEngine.scoutNation(chosen);
+          updateMatchupCards();
+        });
+      });
+    }
+
+    function setAssignMode(mode) {
+      GameState.assignMode = mode;
+      const btnH = document.getElementById("assignHomeMode");
+      const btnA = document.getElementById("assignAwayMode");
+      const cardBtnH = document.getElementById("btnSelectTargetHome");
+      const cardBtnA = document.getElementById("btnSelectTargetAway");
+
+      if (mode === "HOME") {
+        btnH.className = "px-2.5 py-1 rounded-md bg-sky-500 text-slate-950 transition";
+        btnA.className = "px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition";
+        cardBtnH.textContent = "✓ Selecting Home Nation in Roster";
+        cardBtnA.textContent = "Click to Assign Away Nation";
+      } else {
+        btnA.className = "px-2.5 py-1 rounded-md bg-rose-500 text-white transition";
+        btnH.className = "px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition";
+        cardBtnA.textContent = "✓ Selecting Away Nation in Roster";
+        cardBtnH.textContent = "Click to Assign Home Nation";
+      }
+    }
+
+    function bindControlsAndEvents() {
+      // Rublix Modal & LocalStorage Controls
+      const rublixModal = document.getElementById("rublixModal");
+      document.getElementById("btnOpenRublix").addEventListener("click", () => rublixModal.classList.remove("hidden"));
+      document.getElementById("btnCloseRublix").addEventListener("click", () => rublixModal.classList.add("hidden"));
+
+      document.getElementById("btnToggleKeyVis").addEventListener("click", () => {
+        const inp = document.getElementById("rublixKeyInput");
+        inp.type = inp.type === "password" ? "text" : "password";
+      });
+
+      document.getElementById("btnSaveRublix").addEventListener("click", () => {
+        RublixEngine.save(
+          document.getElementById("rublixKeyInput").value,
+          document.getElementById("rublixEndpointInput").value,
+          document.getElementById("rublixModelInput").value
+        );
+        rublixModal.classList.add("hidden");
+        setCommentary("Rublix API Key saved to localStorage!");
+      });
+
+      document.getElementById("btnQuickSaveRublix").addEventListener("click", async () => {
+        const val = document.getElementById("quickRublixInput").value;
+        RublixEngine.save(val, null, null);
+        setCommentary("Rublix API Key saved! Retrieving live nation capabilities...");
+        await Promise.all([
+          RublixEngine.scoutNation(GameState.homeNation),
+          RublixEngine.scoutNation(GameState.awayNation)
+        ]);
+        updateMatchupCards();
+      });
+
+      document.getElementById("btnClearRublix").addEventListener("click", () => {
+        RublixEngine.clear();
+        setCommentary("Rublix API Key cleared from localStorage.");
+      });
+
+      document.getElementById("btnTestRublix").addEventListener("click", async () => {
+        RublixEngine.save(
+          document.getElementById("rublixKeyInput").value,
+          document.getElementById("rublixEndpointInput").value,
+          document.getElementById("rublixModelInput").value
+        );
+        document.getElementById("rublixStatusText").textContent = "Scouting Home & Away nations via Rublix AI...";
+        await Promise.all([
+          RublixEngine.scoutNation(GameState.homeNation),
+          RublixEngine.scoutNation(GameState.awayNation)
+        ]);
+        updateMatchupCards();
+        RublixEngine.syncUI();
+      });
+
+      // Lobby Nation Browser Controls
+      document.getElementById("countrySearchInput").addEventListener("input", renderCountriesList);
+      document.getElementById("confedFilter").addEventListener("change", renderCountriesList);
+      document.getElementById("assignHomeMode").addEventListener("click", () => setAssignMode("HOME"));
+      document.getElementById("assignAwayMode").addEventListener("click", () => setAssignMode("AWAY"));
+      document.getElementById("btnSelectTargetHome").addEventListener("click", () => setAssignMode("HOME"));
+      document.getElementById("btnSelectTargetAway").addEventListener("click", () => setAssignMode("AWAY"));
+
+      document.getElementById("btnRandomMatch").addEventListener("click", async () => {
+        const hIdx = Math.floor(Math.random() * NATIONS_DB.length);
+        let aIdx = Math.floor(Math.random() * NATIONS_DB.length);
+        if (aIdx === hIdx) aIdx = (aIdx + 1) % NATIONS_DB.length;
+        GameState.homeNation = NATIONS_DB[hIdx];
+        GameState.awayNation = NATIONS_DB[aIdx];
+        updateMatchupCards();
+        renderCountriesList();
+      });
+
+      document.getElementById("btnAiScoutBoth").addEventListener("click", async () => {
+        GameState.homeNation.scoutSource = "Scouting...";
+        GameState.awayNation.scoutSource = "Scouting...";
+        updateMatchupCards();
+        await Promise.all([
+          RublixEngine.scoutNation(GameState.homeNation),
+          RublixEngine.scoutNation(GameState.awayNation)
+        ]);
+        updateMatchupCards();
+        setCommentary(`AI Capabilities retrieved for ${GameState.homeNation.name} vs ${GameState.awayNation.name}!`);
+      });
+
+      // Kickoff Match
+      document.getElementById("btnKickoff").addEventListener("click", () => {
+        GameState.weather = document.getElementById("weatherSelect").value;
+        GameState.teamSize = parseInt(document.getElementById("formatSelect").value, 10);
+        GameState.aiDifficulty = parseFloat(document.getElementById("difficultySelect").value);
+
+        // Cleanly reset match clock, score, and period flags ONLY when starting a fresh match
+        GameState.homeScore = 0;
+        GameState.awayScore = 0;
+        GameState.matchSeconds = 0;
+        GameState.half = 1;
+        GameState.isPeriodBreak = false;
+        GameState.matchEnded = false;
+        GameState.setPieceState = null;
+        GameState.clockRunning = true;
+        document.getElementById("hudHomeScore").textContent = "0";
+        document.getElementById("hudAwayScore").textContent = "0";
+        document.getElementById("hudPeriod").textContent = "1ST HALF";
+        updateClockDisplay();
+
+        applyAtmosphere(GameState.weather);
+        spawnTeams();
+        updateMatchupCards();
+
+        document.getElementById("lobbyOverlay").classList.add("hidden");
+        document.getElementById("matchPeriodModal").classList.add("hidden");
+        GameState.isPlaying = true;
+        SoundEngine.startAmbience();
+        SoundEngine.playWhistle(true);
+        if (refereeObj) {
+          refereeObj.gestureTimer = 1.4;
+          refereeObj.gestureType = "WHISTLE";
+        }
+        setCommentary(`KICKOFF! ${GameState.homeNation.name} (${GameState.homeNation.formation}) vs ${GameState.awayNation.name} (${GameState.awayNation.formation})!`);
+      });
+
+      // Half-Time -> Resume 2nd Half (45:00 -> 90:00)
+      document.getElementById("btnResumeSecondHalf").addEventListener("click", () => {
+        document.getElementById("matchPeriodModal").classList.add("hidden");
+        GameState.half = 2;
+        GameState.matchSeconds = 45 * 60;
+        GameState.isPeriodBreak = false;
+        GameState.clockRunning = true;
+        document.getElementById("hudPeriod").textContent = "2ND HALF";
+        updateClockDisplay();
+        resetKickoffPositions("AWAY");
+        SoundEngine.playWhistle(true);
+        if (refereeObj) {
+          refereeObj.gestureTimer = 1.4;
+          refereeObj.gestureType = "WHISTLE";
+        }
+        setCommentary("2ND HALF KICKOFF (45:00)! Play resumes.");
+      });
+
+      // Full-Time Rematch & New Countries buttons
+      document.getElementById("btnRematch").addEventListener("click", () => {
+        document.getElementById("btnKickoff").click();
+      });
+
+      document.getElementById("btnBackToLobby").addEventListener("click", () => {
+        document.getElementById("matchPeriodModal").classList.add("hidden");
+        document.getElementById("lobbyOverlay").classList.remove("hidden");
+        GameState.isPlaying = false;
+      });
+
+      document.getElementById("btnToggleLobby").addEventListener("click", () => {
+        const lobby = document.getElementById("lobbyOverlay");
+        const isHidden = lobby.classList.contains("hidden");
+        if (isHidden) {
+          lobby.classList.remove("hidden");
+          GameState.isPlaying = false;
+        } else {
+          lobby.classList.add("hidden");
+          GameState.isPlaying = true;
+        }
+      });
+
+      // Top HUD Camera, Resolution & Audio
+      document.getElementById("btnCamera").addEventListener("click", () => {
+        GameState.cameraMode = (GameState.cameraMode + 1) % CAMERA_MODES.length;
+        document.getElementById("camLabel").textContent = CAMERA_MODES[GameState.cameraMode];
+      });
+
+      document.getElementById("resSelector").addEventListener("change", onWindowResize);
+      document.getElementById("btnAudio").addEventListener("click", () => SoundEngine.toggle());
+
+      // Keyboard Controls
+      window.addEventListener("keydown", e => {
+        keys[e.code] = true;
+        if (!GameState.isPlaying) return;
+
+        if (e.code === "Space") {
+          e.preventDefault();
+          if (ballState.owner === controlledPlayer && !GameState.shotCharging) {
+            GameState.shotCharging = true;
+            GameState.shotCharge = 0.25;
+          } else if (!ballState.owner && controlledPlayer) {
+            // Slide tackle / lunge toward ball
+            const lunge = ballState.pos.clone().sub(controlledPlayer.mesh.position).normalize();
+            controlledPlayer.vel.copy(lunge.multiplyScalar(15));
+            SoundEngine.playKick(0.25);
+          }
+        } else if (e.code === "KeyX" || e.code === "KeyE") {
+          if (ballState.owner === controlledPlayer) executePass(controlledPlayer, false);
+          else switchControlledPlayer();
+        } else if (e.code === "KeyC") {
+          if (ballState.owner === controlledPlayer) executePass(controlledPlayer, true);
+        } else if (e.code === "KeyQ") {
+          switchControlledPlayer();
+        }
+      });
+
+      window.addEventListener("keyup", e => {
+        keys[e.code] = false;
+        if (e.code === "Space" && GameState.shotCharging) {
+          GameState.shotCharging = false;
+          document.getElementById("powerBarWrapper").style.opacity = "0";
+          if (ballState.owner === controlledPlayer) {
+            executeShot(controlledPlayer, GameState.shotCharge);
+          }
+          GameState.shotCharge = 0;
+        }
+      });
+
+      // Touch & Mouse Action Buttons
+      const bindActionBtn = (id, downFn, upFn) => {
+        const el = document.getElementById(id);
+        el.addEventListener("pointerdown", e => {
+          e.preventDefault();
+          el.classList.add("pressed");
+          if (downFn) downFn();
+        });
+        const release = e => {
+          e.preventDefault();
+          el.classList.remove("pressed");
+          if (upFn) upFn();
+        };
+        el.addEventListener("pointerup", release);
+        el.addEventListener("pointerleave", release);
+      };
+
+      bindActionBtn("btnTouchSwitch", () => switchControlledPlayer());
+      bindActionBtn("btnTouchPass", () => {
+        if (ballState.owner === controlledPlayer) executePass(controlledPlayer, false);
+        else switchControlledPlayer();
+      });
+      bindActionBtn("btnTouchThrough", () => {
+        if (ballState.owner === controlledPlayer) executePass(controlledPlayer, true);
+      });
+      bindActionBtn(
+        "btnTouchShoot",
+        () => {
+          if (ballState.owner === controlledPlayer) {
+            GameState.shotCharging = true;
+            GameState.shotCharge = 0.35;
+          }
+        },
+        () => {
+          if (GameState.shotCharging) {
+            GameState.shotCharging = false;
+            document.getElementById("powerBarWrapper").style.opacity = "0";
+            if (ballState.owner === controlledPlayer) executeShot(controlledPlayer, GameState.shotCharge);
+          }
+        }
+      );
+
+      // Virtual Analog Joystick (Touch + Mouse Drag)
+      const stickZone = document.getElementById("virtualStickZone");
+      const stickKnob = document.getElementById("virtualStickKnob");
+      const maxRadius = 42;
+
+      const handleStickMove = clientX => e => {
+        const rect = stickZone.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const pt = e.touches ? e.touches[0] : e;
+        let dx = pt.clientX - cx;
+        let dy = pt.clientY - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > maxRadius) {
+          dx = (dx / dist) * maxRadius;
+          dy = (dy / dist) * maxRadius;
+        }
+        stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+        joyVec.x = dx / maxRadius;
+        joyVec.y = dy / maxRadius;
+        joyVec.active = true;
+      };
+
+      stickZone.addEventListener("pointerdown", e => {
+        stickZone.setPointerCapture(e.pointerId);
+        handleStickMove()(e);
+      });
+      stickZone.addEventListener("pointermove", e => {
+        if (joyVec.active) handleStickMove()(e);
+      });
+      const resetStick = () => {
+        joyVec.active = false;
+        joyVec.x = 0;
+        joyVec.y = 0;
+        stickKnob.style.transform = "translate(0px, 0px)";
+      };
+      stickZone.addEventListener("pointerup", resetStick);
+      stickZone.addEventListener("pointercancel", resetStick);
+    }
+
+    window.onload = function () {
+      RublixEngine.syncUI();
+      updateMatchupCards();
+      renderCountriesList();
+      bindControlsAndEvents();
+      initThreeEngine();
+      animate(performance.now());
+    };
+  </script>
+</body>
+</html>
